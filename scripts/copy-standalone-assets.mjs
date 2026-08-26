@@ -34,6 +34,7 @@ if (!existsSync(standaloneDir)) {
 const copies = [
   { from: path.join(root, "public"), to: path.join(standaloneDir, "public") },
   { from: path.join(root, ".next", "static"), to: path.join(standaloneDir, ".next", "static") },
+  { from: path.join(root, "db", "migrations"), to: path.join(standaloneDir, "db", "migrations") },
 ];
 
 for (const { from, to } of copies) {
