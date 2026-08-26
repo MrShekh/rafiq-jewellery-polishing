@@ -382,7 +382,7 @@ export function OrderRegistryTable() {
         size: 130,
         cell: ({ row }) => {
           if (row.original.weightIn2 != null) {
-            return <ReadOnlyCell value="—" className="text-muted-foreground" />;
+            return <ReadOnlyCell value={row.original.makingCharge} className="text-muted-foreground bg-muted/20" />;
           }
           return (
             <GridTextInput
