@@ -1,0 +1,128 @@
+{
+  "name": "jewellery-polishing-app",
+  "version": "1.0.0",
+  "description": "Offline-first order registry and workshop management for jewellery polishing businesses.",
+  "author": "Jewellery Polishing Manager",
+  "private": true,
+  "main": "dist-electron/main.js",
+  "scripts": {
+    "dev": "cross-env ELECTRON_RUN_AS_NODE=1 electron node_modules/next/dist/bin/next dev",
+    "build": "next build",
+    "postbuild": "node scripts/copy-standalone-assets.mjs",
+    "start": "next start",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "db:generate": "drizzle-kit generate",
+    "db:studio": "drizzle-kit studio",
+    "build:electron": "tsc -p electron/tsconfig.json",
+    "electron:dev": "npm run build:electron && concurrently -k \"next dev\" \"wait-on http://localhost:3000 && cross-env ELECTRON_DEV_SERVER_URL=http://localhost:3000 electron .\"",
+    "electron:pack": "electron-rebuild -f -w better-sqlite3 && npm run build && npm run build:electron && electron-builder --win",
+    "electron:pack:dir": "electron-rebuild -f -w better-sqlite3 && npm run build && npm run build:electron && electron-builder --win --dir"
+  },
+  "dependencies": {
+    "@hookform/resolvers": "^5.9.1",
+    "@radix-ui/react-alert-dialog": "^1.1.23",
+    "@radix-ui/react-checkbox": "^1.3.11",
+    "@radix-ui/react-dialog": "^1.1.23",
+    "@radix-ui/react-dropdown-menu": "^2.1.24",
+    "@radix-ui/react-label": "^2.1.15",
+    "@radix-ui/react-popover": "^1.1.23",
+    "@radix-ui/react-scroll-area": "^1.2.18",
+    "@radix-ui/react-select": "^2.3.7",
+    "@radix-ui/react-separator": "^1.1.15",
+    "@radix-ui/react-slot": "^1.3.3",
+    "@radix-ui/react-switch": "^1.3.7",
+    "@radix-ui/react-tabs": "^1.1.21",
+    "@radix-ui/react-visually-hidden": "^1.2.11",
+    "@tanstack/react-table": "^8.20.5",
+    "archiver": "^6.0.2",
+    "bcryptjs": "^3.0.3",
+    "better-sqlite3": "^13.0.3",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "date-fns": "^4.4.0",
+    "decimal.js": "^10.6.0",
+    "drizzle-orm": "^0.45.2",
+    "electron-log": "^5.4.4",
+    "exceljs": "^4.4.0",
+    "extract-zip": "^2.0.1",
+    "lucide-react": "^1.34.0",
+    "mongodb": "^7.6.0",
+    "nanoid": "^6.0.1",
+    "next": "^14.2.35",
+    "next-themes": "^0.4.6",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-hook-form": "^7.86.0",
+    "sonner": "^2.0.8",
+    "swr": "^2.5.1",
+    "tailwind-merge": "^3.6.0",
+    "tailwindcss-animate": "^1.0.7",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@electron/rebuild": "^4.2.0",
+    "@tailwindcss/postcss": "^4",
+    "@types/archiver": "^6.0.3",
+    "@types/bcryptjs": "^2.4.6",
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/node": "^20",
+    "@types/react": "^18.3.29",
+    "@types/react-dom": "^18.3.7",
+    "@vitest/ui": "^4.1.11",
+    "concurrently": "^10.0.5",
+    "cross-env": "^10.1.0",
+    "drizzle-kit": "^0.31.10",
+    "electron": "^44.0.0",
+    "electron-builder": "^26.15.3",
+    "electron-serve": "^3.0.1",
+    "electron-updater": "^6.8.9",
+    "eslint": "^8.57.1",
+    "eslint-config-next": "^14.2.35",
+    "playwright": "^1.62.1",
+    "tailwindcss": "^4",
+    "typescript": "^5",
+    "vitest": "^4.1.11",
+    "wait-on": "^9.1.0"
+  },
+  "build": {
+    "appId": "com.jewellerypolishing.manager",
+    "productName": "Jewellery Polishing Manager",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist-electron/**/*",
+      "package.json"
+    ],
+    "npmRebuild": false,
+    "extraResources": [
+      {
+        "from": "build-stage",
+        "to": "app-server",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "asar": true,
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "YOUR_GITHUB_USERNAME",
+      "repo": "YOUR_GITHUB_REPO_NAME"
+    }
+  }
+}

@@ -1,0 +1,47 @@
+import { NextRequest } from "next/server";
+import { z } from "zod";
+
+import { handleApiError, ok } from "@/lib/api/respond";
+import { findUserByUsername, touchLastLogin } from "@/lib/db/repositories/users";
+import { verifyPassword } from "@/lib/auth/password";
+import { createSession } from "@/lib/auth/session";
+import { logger } from "@/lib/logger";
+
+// Always dynamic: every route here reads the session cookie and/or hits
+// SQLite directly, so there is nothing safe to prerender or cache.
+export const dynamic = "force-dynamic";
+
+const loginSchema = z.object({
+  username: z.string().trim().min(1),
+  password: z.string().min(1),
+});
+
+export async function POST(req: NextRequest) {
+  try {
+    const { username, password } = loginSchema.parse(await req.json());
+
+    const user = findUserByUsername(username);
+    if (!user || !user.isActive) {
+      // Deliberately identical message for "no such user" vs "wrong
+      // password" so login can't be used to enumerate usernames.
+      logger.warn("Login failed: unknown or inactive user", { username });
+      return ok({ error: "Incorrect username or password." }, 401);
+    }
+
+    const valid = await verifyPassword(password, user.passwordHash);
+    if (!valid) {
+      logger.warn("Login failed: bad password", { username });
+      return ok({ error: "Incorrect username or password." }, 401);
+    }
+
+    await createSession(user.id);
+    touchLastLogin(user.id);
+    logger.info("Login succeeded", { userId: user.id, username });
+
+    return ok({
+      user: { id: user.id, username: user.username, displayName: user.displayName, role: user.role },
+    });
+  } catch (err) {
+    return handleApiError(err);
+  }
+}
