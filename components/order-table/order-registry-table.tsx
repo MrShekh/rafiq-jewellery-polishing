@@ -145,7 +145,12 @@ export function OrderRegistryTable() {
 
   async function commitField(order: Order, field: string, rawValue: string) {
     try {
-      const payload: Record<string, unknown> = { [field]: rawValue };
+      let payload: Record<string, unknown> = { [field]: rawValue };
+
+      // Clearing 2nd polishing step: empty string → null
+      if ((field === "weightIn2" || field === "weightOut2") && rawValue === "") {
+        payload = { weightIn2: null, weightOut2: null };
+      }
 
       if (field === "weightOut" || field === "weightIn") {
         const weightIn = field === "weightIn" ? Number(rawValue) : Number(order.weightIn);
@@ -285,8 +290,8 @@ export function OrderRegistryTable() {
       },
       {
         id: "weightIn",
-        header: "Weight In",
-        size: 110,
+        header: "Wt In 1",
+        size: 100,
         cell: ({ row }) => (
           <GridTextInput
             rowId={row.original.id}
@@ -305,8 +310,8 @@ export function OrderRegistryTable() {
       },
       {
         id: "weightOut",
-        header: "Weight Out",
-        size: 110,
+        header: "Wt Out 1",
+        size: 100,
         cell: ({ row }) => (
           <GridTextInput
             rowId={row.original.id}
@@ -324,24 +329,77 @@ export function OrderRegistryTable() {
         ),
       },
       {
+        id: "weightIn2",
+        header: "Wt In 2",
+        size: 100,
+        cell: ({ row }) => {
+          const has2 = row.original.weightIn2 != null;
+          if (!has2) return <div className="h-8" />;
+          return (
+            <GridTextInput
+              rowId={row.original.id}
+              columnKey="weightIn2"
+              refs={cellRefs}
+              rowOrder={rowOrder}
+              onNavigate={navigate}
+              value={row.original.weightIn2 ?? "0.000"}
+              onCommit={(v) => commitField(row.original, "weightIn2", v)}
+              type="number"
+              align="right"
+              step="0.001"
+              min="0"
+            />
+          );
+        },
+      },
+      {
+        id: "weightOut2",
+        header: "Wt Out 2",
+        size: 100,
+        cell: ({ row }) => {
+          const has2 = row.original.weightIn2 != null;
+          if (!has2) return <div className="h-8" />;
+          return (
+            <GridTextInput
+              rowId={row.original.id}
+              columnKey="weightOut2"
+              refs={cellRefs}
+              rowOrder={rowOrder}
+              onNavigate={navigate}
+              value={row.original.weightOut2 ?? "0.000"}
+              onCommit={(v) => commitField(row.original, "weightOut2", v)}
+              type="number"
+              align="right"
+              step="0.001"
+              min="0"
+            />
+          );
+        },
+      },
+      {
         id: "makingCharge",
         header: "Making Charge",
         size: 130,
-        cell: ({ row }) => (
-          <GridTextInput
-            rowId={row.original.id}
-            columnKey="makingCharge"
-            refs={cellRefs}
-            rowOrder={rowOrder}
-            onNavigate={navigate}
-            value={row.original.makingCharge}
-            onCommit={(v) => commitField(row.original, "makingCharge", v)}
-            type="number"
-            align="right"
-            step="0.001"
-            min="0"
-          />
-        ),
+        cell: ({ row }) => {
+          if (row.original.weightIn2 != null) {
+            return <ReadOnlyCell value="—" className="text-muted-foreground" />;
+          }
+          return (
+            <GridTextInput
+              rowId={row.original.id}
+              columnKey="makingCharge"
+              refs={cellRefs}
+              rowOrder={rowOrder}
+              onNavigate={navigate}
+              value={row.original.makingCharge}
+              onCommit={(v) => commitField(row.original, "makingCharge", v)}
+              type="number"
+              align="right"
+              step="0.001"
+              min="0"
+            />
+          );
+        },
       },
       {
         id: "loss",
@@ -380,23 +438,48 @@ export function OrderRegistryTable() {
       {
         id: "actions",
         header: "",
-        size: 44,
+        size: 80,
         cell: ({ row }) => (
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7 text-muted-foreground opacity-0 hover:text-destructive group-hover:opacity-100"
-            onClick={() => setDeleteTarget(row.original)}
-            aria-label="Delete order"
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-          </Button>
+          <div className="flex items-center gap-0.5">
+            <Button
+              variant="ghost"
+              size="sm"
+              className={cn(
+                "h-7 px-1.5 text-xs font-medium",
+                row.original.weightIn2 != null
+                  ? "text-amber-600 hover:text-amber-700"
+                  : "text-muted-foreground hover:text-primary",
+              )}
+              onClick={() => {
+                if (row.original.weightIn2 != null) {
+                  commitField(row.original, "weightIn2", "");
+                  commitField(row.original, "weightOut2", "");
+                } else {
+                  commitField(row.original, "weightIn2", "0.000");
+                  commitField(row.original, "weightOut2", "0.000");
+                }
+              }}
+              title={row.original.weightIn2 != null ? "Remove 2nd polishing step" : "Add 2nd polishing step"}
+            >
+              {row.original.weightIn2 != null ? "−2nd" : "+2nd"}
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 text-muted-foreground opacity-0 hover:text-destructive group-hover:opacity-100"
+              onClick={() => setDeleteTarget(row.original)}
+              aria-label="Delete order"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </Button>
+          </div>
         ),
       },
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [customers, rowOrder],
   );
+
 
   const table = useReactTable({
     data: orders,
@@ -585,11 +668,13 @@ export function OrderRegistryTable() {
 function TotalsFooter({ totals }: { totals?: OrderTotals }) {
   if (!totals) return null;
   return (
-    <div className="grid shrink-0 grid-cols-[120px_200px_150px_80px_110px_110px_130px_90px_80px_100px_44px] border-t-2 border-primary/40 bg-table-totals text-xs font-semibold">
+    <div className="grid shrink-0 grid-cols-[120px_200px_150px_80px_100px_100px_100px_100px_130px_90px_80px_100px_80px] border-t-2 border-primary/40 bg-table-totals text-xs font-semibold">
       <div className="col-span-3 flex items-center px-3 py-1.5">TOTAL</div>
       <div className="flex items-center justify-end px-3 py-1.5 tabular-nums">{totals.totalPieces}</div>
       <div className="flex items-center justify-end px-3 py-1.5 tabular-nums">{totals.totalWeightIn}</div>
       <div className="flex items-center justify-end px-3 py-1.5 tabular-nums">{totals.totalWeightOut}</div>
+      <div className="flex items-center justify-end px-3 py-1.5 tabular-nums">{totals.totalWeightIn2 || "0.000"}</div>
+      <div className="flex items-center justify-end px-3 py-1.5 tabular-nums">{totals.totalWeightOut2 || "0.000"}</div>
       <div className="flex items-center justify-end px-3 py-1.5 tabular-nums">{totals.totalMakingCharge}</div>
       <div className="flex items-center justify-end px-3 py-1.5 tabular-nums">{totals.totalLoss}</div>
       <div className="px-3 py-1.5" />

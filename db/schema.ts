@@ -92,6 +92,9 @@ export const orders = sqliteTable("orders", {
   touch: text("touch").notNull(),
   fineTotal: text("fine_total").notNull(),
 
+  weightIn2: text("weight_in_2"),
+  weightOut2: text("weight_out_2"),
+
   // Set true when the user explicitly confirmed a Weight Out > Weight In
   // entry (section 10) so the row doesn't keep re-triggering the warning.
   weightExceedsConfirmed: integer("weight_exceeds_confirmed", { mode: "boolean" })

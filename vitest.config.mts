@@ -4,6 +4,8 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["tests/**/*.test.ts"],
+    // @ts-ignore
+    threads: false,
   },
   resolve: {
     alias: {

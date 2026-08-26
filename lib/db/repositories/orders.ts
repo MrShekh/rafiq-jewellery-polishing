@@ -11,8 +11,8 @@ import { queueSync } from "@/lib/db/repositories/sync-helpers";
 import { recordAudit } from "@/lib/db/repositories/audit";
 import { logger } from "@/lib/logger";
 
-export class NotFoundError extends Error {}
-export class ConflictError extends Error {}
+export class NotFoundError extends Error { }
+export class ConflictError extends Error { }
 
 function generateOrderNumber(orderDate: string): string {
   const date = new Date(`${orderDate}T00:00:00`);
@@ -150,6 +150,8 @@ export function createOrder(input: OrderInput, userId: string | null): OrderMuta
     weightOut: input.weightOut,
     makingCharge: input.makingCharge,
     touch: input.touch,
+    weightIn2: input.weightIn2,
+    weightOut2: input.weightOut2,
     precision,
     formulaVersion,
   });
@@ -181,6 +183,8 @@ export function createOrder(input: OrderInput, userId: string | null): OrderMuta
       loss: calc.lossString,
       touch: Number(input.touch).toFixed(precision.touch),
       fineTotal: calc.fineTotalString,
+      weightIn2: input.weightIn2 ? Number(input.weightIn2).toFixed(precision.weight) : null,
+      weightOut2: input.weightOut2 ? Number(input.weightOut2).toFixed(precision.weight) : null,
       weightExceedsConfirmed: input.weightExceedsConfirmed ?? false,
       notes: input.notes ?? null,
       createdBy: userId,
@@ -226,6 +230,8 @@ export function updateOrder(
     weightOut: input.weightOut ?? existing.weightOut,
     makingCharge: input.makingCharge ?? existing.makingCharge,
     touch: input.touch ?? existing.touch,
+    weightIn2: input.weightIn2 !== undefined ? input.weightIn2 : existing.weightIn2,
+    weightOut2: input.weightOut2 !== undefined ? input.weightOut2 : existing.weightOut2,
     notes: input.notes !== undefined ? input.notes : existing.notes,
     weightExceedsConfirmed:
       input.weightExceedsConfirmed !== undefined
@@ -245,6 +251,8 @@ export function updateOrder(
     weightOut: merged.weightOut,
     makingCharge: merged.makingCharge,
     touch: merged.touch,
+    weightIn2: merged.weightIn2,
+    weightOut2: merged.weightOut2,
     precision,
     formulaVersion,
   });
@@ -271,6 +279,8 @@ export function updateOrder(
       loss: calc.lossString,
       touch: Number(merged.touch).toFixed(precision.touch),
       fineTotal: calc.fineTotalString,
+      weightIn2: merged.weightIn2 ? Number(merged.weightIn2).toFixed(precision.weight) : null,
+      weightOut2: merged.weightOut2 ? Number(merged.weightOut2).toFixed(precision.weight) : null,
       weightExceedsConfirmed: merged.weightExceedsConfirmed,
       notes: merged.notes,
       updatedBy: userId,

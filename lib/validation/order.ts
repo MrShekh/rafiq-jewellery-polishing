@@ -23,6 +23,14 @@ const nonNegativeDecimalString = z
 // `.partial()`, so the update schema (which needs every field optional)
 // is built from this plain object schema instead of from
 // `orderInputSchema` itself.
+const optionalDecimalString = z
+  .string()
+  .trim()
+  .optional()
+  .nullable()
+  .refine((v) => !v || !Number.isNaN(Number(v)), "Must be a number")
+  .refine((v) => !v || Number(v) >= 0, "Must be zero or greater");
+
 export const orderObjectSchema = z.object({
   orderDate: isoDate,
   customerId: z.string().min(1, "Select a customer"),
@@ -35,6 +43,8 @@ export const orderObjectSchema = z.object({
   weightOut: nonNegativeDecimalString,
   makingCharge: nonNegativeDecimalString,
   touch: nonNegativeDecimalString,
+  weightIn2: optionalDecimalString,
+  weightOut2: optionalDecimalString,
   notes: z.string().max(2000).optional().nullable(),
   // User's explicit confirmation that Weight Out > Weight In is intentional
   // (e.g. an additional piece was added during polishing). Section 10.
@@ -94,6 +104,8 @@ export interface OrderInput {
   weightOut: string;
   makingCharge: string;
   touch: string;
+  weightIn2?: string | null;
+  weightOut2?: string | null;
   notes?: string | null;
   weightExceedsConfirmed?: boolean;
 }

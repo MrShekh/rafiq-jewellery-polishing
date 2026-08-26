@@ -86,6 +86,8 @@ export interface OrderCalculationInput {
   weightOut: DecimalInput;
   makingCharge: DecimalInput;
   touch: DecimalInput;
+  weightIn2?: DecimalInput | null;
+  weightOut2?: DecimalInput | null;
   precision?: PrecisionPolicy;
   formulaVersion?: FormulaVersion;
 }
@@ -103,16 +105,24 @@ export function calculateLoss(
   weightIn: DecimalInput,
   weightOut: DecimalInput,
   makingCharge: DecimalInput,
+  weightIn2?: DecimalInput | null,
+  weightOut2?: DecimalInput | null,
   precision: PrecisionPolicy = DEFAULT_PRECISION,
   formulaVersion: FormulaVersion = "v1-standard",
 ): Decimal {
   const formula = resolveFormulaSet(formulaVersion);
-  const raw = formula.loss({
+  const raw1 = formula.loss({
     weightIn: toDecimal(weightIn),
     weightOut: toDecimal(weightOut),
     makingCharge: toDecimal(makingCharge),
   });
-  return round(raw, precision.weight);
+
+  let raw2 = new Decimal(0);
+  if (weightIn2 != null && weightOut2 != null && weightIn2 !== "" && weightOut2 !== "") {
+    raw2 = toDecimal(weightIn2).minus(toDecimal(weightOut2));
+  }
+
+  return round(raw1.plus(raw2), precision.weight);
 }
 
 export function calculateFineTotal(
@@ -135,6 +145,8 @@ export function calculateOrder(input: OrderCalculationInput): OrderCalculationRe
     input.weightIn,
     input.weightOut,
     input.makingCharge,
+    input.weightIn2,
+    input.weightOut2,
     precision,
     formulaVersion,
   );
@@ -156,6 +168,8 @@ export interface OrderLike {
   makingCharge: DecimalInput;
   loss: DecimalInput;
   fineTotal: DecimalInput;
+  weightIn2?: DecimalInput | null;
+  weightOut2?: DecimalInput | null;
 }
 
 export interface OrderTotals {
@@ -165,6 +179,8 @@ export interface OrderTotals {
   totalMakingCharge: string;
   totalLoss: string;
   totalFineTotal: string;
+  totalWeightIn2: string;
+  totalWeightOut2: string;
 }
 
 /** Sums a page/filtered-set of orders for the sticky totals row (section 11) and dashboard summaries. */
@@ -178,6 +194,8 @@ export function calculateOrderTotals(
   let totalMakingCharge = new Decimal(0);
   let totalLoss = new Decimal(0);
   let totalFineTotal = new Decimal(0);
+  let totalWeightIn2 = new Decimal(0);
+  let totalWeightOut2 = new Decimal(0);
 
   for (const order of ordersList) {
     totalPieces += order.pieces;
@@ -186,6 +204,12 @@ export function calculateOrderTotals(
     totalMakingCharge = totalMakingCharge.plus(toDecimal(order.makingCharge));
     totalLoss = totalLoss.plus(toDecimal(order.loss));
     totalFineTotal = totalFineTotal.plus(toDecimal(order.fineTotal));
+    if (order.weightIn2 != null && order.weightIn2 !== "") {
+      totalWeightIn2 = totalWeightIn2.plus(toDecimal(order.weightIn2));
+    }
+    if (order.weightOut2 != null && order.weightOut2 !== "") {
+      totalWeightOut2 = totalWeightOut2.plus(toDecimal(order.weightOut2));
+    }
   }
 
   return {
@@ -195,6 +219,8 @@ export function calculateOrderTotals(
     totalMakingCharge: round(totalMakingCharge, precision.weight).toFixed(precision.weight),
     totalLoss: round(totalLoss, precision.weight).toFixed(precision.weight),
     totalFineTotal: round(totalFineTotal, precision.fine).toFixed(precision.fine),
+    totalWeightIn2: round(totalWeightIn2, precision.weight).toFixed(precision.weight),
+    totalWeightOut2: round(totalWeightOut2, precision.weight).toFixed(precision.weight),
   };
 }
 

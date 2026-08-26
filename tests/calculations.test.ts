@@ -17,7 +17,7 @@ describe("calculateLoss", () => {
   it("never produces floating point drift (0.1 + 0.2 style errors)", () => {
     // Weight In - Weight Out - Making Charge chosen so naive float math
     // would produce 0.30000000000000004 instead of exactly 0.3.
-    const loss = calculateLoss("0.4", "0.1", "0.0", { weight: 10, touch: 2, fine: 3 });
+    const loss = calculateLoss("0.4", "0.1", "0.0", null, null, { weight: 10, touch: 2, fine: 3 });
     expect(loss.toString()).toBe("0.3");
   });
 
@@ -50,6 +50,20 @@ describe("calculateOrder (end to end, brief section 9 example)", () => {
     });
     expect(result.lossString).toBe("0.300");
     expect(result.fineTotalString).toBe("0.225");
+    expect(result.isLossNegative).toBe(false);
+  });
+
+  it("handles second polishing step: Wt In 1 25.500 / Wt Out 1 25.100 / Making Charge 0.100 / Wt In 2 10.000 / Wt Out 2 9.800 / Touch 75 -> Loss 0.500, Fine 0.375", () => {
+    const result = calculateOrder({
+      weightIn: "25.500",
+      weightOut: "25.100",
+      makingCharge: "0.100",
+      weightIn2: "10.000",
+      weightOut2: "9.800",
+      touch: "75",
+    });
+    expect(result.lossString).toBe("0.500"); // (25.5 - 25.1 - 0.1) + (10 - 9.8) = 0.3 + 0.2 = 0.5
+    expect(result.fineTotalString).toBe("0.375"); // 0.5 * 75 / 100 = 0.375
     expect(result.isLossNegative).toBe(false);
   });
 });
