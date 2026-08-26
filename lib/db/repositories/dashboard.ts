@@ -7,16 +7,26 @@ import { getPrecisionPolicy } from "@/lib/db/repositories/settings";
 
 function todayRangeIso(): { start: string; end: string } {
   const now = new Date();
-  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const iso = start.toISOString().slice(0, 10);
-  return { start: iso, end: iso };
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  const localDateStr = `${year}-${month}-${day}`;
+  return { start: localDateStr, end: localDateStr };
 }
 
 function monthRangeIso(): { start: string; end: string } {
   const now = new Date();
-  const start = new Date(now.getFullYear(), now.getMonth(), 1);
-  const end = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-  return { start: start.toISOString().slice(0, 10), end: end.toISOString().slice(0, 10) };
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+
+  const start = "01";
+  const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+  const end = String(lastDay).padStart(2, "0");
+
+  return {
+    start: `${year}-${month}-${start}`,
+    end: `${year}-${month}-${end}`,
+  };
 }
 
 function summarizeRange(startDate: string, endDate: string): OrderTotals & { orderCount: number } {
