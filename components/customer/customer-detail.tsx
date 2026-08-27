@@ -59,11 +59,13 @@ export function CustomerDetail({ customerId }: { customerId: string }) {
         </div>
       </div>
 
-      <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+      <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-8">
         <SummaryTile label="Total Orders" value={summary.totalOrders.toLocaleString()} />
         <SummaryTile label="Total Pieces" value={summary.totalPieces.toLocaleString()} />
-        <SummaryTile label="Total Weight In" value={summary.totalWeightIn} />
-        <SummaryTile label="Total Weight Out" value={summary.totalWeightOut} />
+        <SummaryTile label="Total Wt In 1" value={summary.totalWeightIn} />
+        <SummaryTile label="Total Wt Out 1" value={summary.totalWeightOut} />
+        <SummaryTile label="Total Wt In 2" value={summary.totalWeightIn2 || "0.000"} />
+        <SummaryTile label="Total Wt Out 2" value={summary.totalWeightOut2 || "0.000"} />
         <SummaryTile label="Total Loss" value={summary.totalLoss} />
         <SummaryTile label="Total Fine" value={summary.totalFine} emphasize />
       </div>
@@ -80,8 +82,10 @@ export function CustomerDetail({ customerId }: { customerId: string }) {
                 <TableHead>Date</TableHead>
                 <TableHead>Item</TableHead>
                 <TableHead className="text-right">Pieces</TableHead>
-                <TableHead className="text-right">Weight In</TableHead>
-                <TableHead className="text-right">Weight Out</TableHead>
+                <TableHead className="text-right">Wt In 1</TableHead>
+                <TableHead className="text-right">Wt Out 1</TableHead>
+                <TableHead className="text-right">Wt In 2</TableHead>
+                <TableHead className="text-right">Wt Out 2</TableHead>
                 <TableHead className="text-right">Loss</TableHead>
                 <TableHead className="text-right">Touch</TableHead>
                 <TableHead className="text-right">Fine Total</TableHead>
@@ -90,7 +94,7 @@ export function CustomerDetail({ customerId }: { customerId: string }) {
             <TableBody>
               {history.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={9} className="h-24 text-center text-sm text-muted-foreground">
+                  <TableCell colSpan={11} className="h-24 text-center text-sm text-muted-foreground">
                     No orders yet for this customer.
                   </TableCell>
                 </TableRow>
@@ -103,6 +107,8 @@ export function CustomerDetail({ customerId }: { customerId: string }) {
                   <TableCell className="px-3 py-2 text-right tabular-nums">{o.pieces}</TableCell>
                   <TableCell className="px-3 py-2 text-right tabular-nums">{o.weightIn}</TableCell>
                   <TableCell className="px-3 py-2 text-right tabular-nums">{o.weightOut}</TableCell>
+                  <TableCell className="px-3 py-2 text-right tabular-nums text-muted-foreground">{o.weightIn2 || "—"}</TableCell>
+                  <TableCell className="px-3 py-2 text-right tabular-nums text-muted-foreground">{o.weightOut2 || "—"}</TableCell>
                   <TableCell className="px-3 py-2 text-right tabular-nums">{o.loss}</TableCell>
                   <TableCell className="px-3 py-2 text-right tabular-nums">{o.touch}</TableCell>
                   <TableCell className="px-3 py-2 text-right font-medium tabular-nums">{o.fineTotal}</TableCell>

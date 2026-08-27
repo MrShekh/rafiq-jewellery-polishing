@@ -117,6 +117,8 @@ export function listOrders(filter: OrderFilter): {
       makingCharge: orders.makingCharge,
       loss: orders.loss,
       fineTotal: orders.fineTotal,
+      weightIn2: orders.weightIn2,
+      weightOut2: orders.weightOut2,
     })
     .from(orders)
     .where(whereClause)

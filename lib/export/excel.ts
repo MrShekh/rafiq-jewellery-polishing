@@ -46,8 +46,10 @@ export async function buildOrderRegistryWorkbook(
     "Customer",
     "Item",
     "Pieces",
-    "Weight In",
-    "Weight Out",
+    "Wt In 1",
+    "Wt Out 1",
+    "Wt In 2",
+    "Wt Out 2",
     "Making Charge",
     "Loss",
     "Touch",
@@ -71,6 +73,8 @@ export async function buildOrderRegistryWorkbook(
       order.pieces,
       Number(order.weightIn),
       Number(order.weightOut),
+      order.weightIn2 ? Number(order.weightIn2) : "",
+      order.weightOut2 ? Number(order.weightOut2) : "",
       Number(order.makingCharge),
       Number(order.loss),
       Number(order.touch),
@@ -85,6 +89,8 @@ export async function buildOrderRegistryWorkbook(
     totals.totalPieces,
     Number(totals.totalWeightIn),
     Number(totals.totalWeightOut),
+    Number(totals.totalWeightIn2),
+    Number(totals.totalWeightOut2),
     Number(totals.totalMakingCharge),
     Number(totals.totalLoss),
     "",
@@ -103,15 +109,17 @@ export async function buildOrderRegistryWorkbook(
     { width: 9 },
     { width: 12 },
     { width: 12 },
+    { width: 12 },
+    { width: 12 },
     { width: 14 },
     { width: 10 },
     { width: 8 },
     { width: 12 },
   ];
 
-  for (let c = 5; c <= 8; c++) sheet.getColumn(c).numFmt = numFmt3;
-  sheet.getColumn(9).numFmt = numFmt2;
-  sheet.getColumn(10).numFmt = numFmt3;
+  for (let c = 5; c <= 10; c++) sheet.getColumn(c).numFmt = numFmt3;
+  sheet.getColumn(11).numFmt = numFmt2;
+  sheet.getColumn(12).numFmt = numFmt3;
 
   return workbook.xlsx.writeBuffer();
 }

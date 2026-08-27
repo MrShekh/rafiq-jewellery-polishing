@@ -145,6 +145,8 @@ export interface CustomerSummary {
   totalWeightOut: string;
   totalLoss: string;
   totalFine: string;
+  totalWeightIn2: string;
+  totalWeightOut2: string;
 }
 
 export function getCustomerSummary(customerId: string): CustomerSummary {
@@ -156,6 +158,8 @@ export function getCustomerSummary(customerId: string): CustomerSummary {
       makingCharge: orders.makingCharge,
       loss: orders.loss,
       fineTotal: orders.fineTotal,
+      weightIn2: orders.weightIn2,
+      weightOut2: orders.weightOut2,
     })
     .from(orders)
     .where(and(eq(orders.customerId, customerId), isNull(orders.deletedAt)))
@@ -170,6 +174,8 @@ export function getCustomerSummary(customerId: string): CustomerSummary {
     totalWeightOut: totals.totalWeightOut,
     totalLoss: totals.totalLoss,
     totalFine: totals.totalFineTotal,
+    totalWeightIn2: totals.totalWeightIn2,
+    totalWeightOut2: totals.totalWeightOut2,
   };
 }
 
