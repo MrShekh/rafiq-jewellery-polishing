@@ -1,6 +1,6 @@
 {
   "name": "jewellery-polishing-app",
-  "version": "1.0.4",
+  "version": "1.0.6",
   "description": "Offline-first order registry and workshop management for jewellery polishing businesses.",
   "author": "Jewellery Polishing Manager",
   "private": true,
@@ -117,7 +117,8 @@
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
-      "createStartMenuShortcut": true
+      "createStartMenuShortcut": true,
+      "deleteAppDataOnUninstall": false
     },
     "publish": {
       "provider": "github",
