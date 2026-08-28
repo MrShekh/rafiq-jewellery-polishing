@@ -42,6 +42,8 @@ export function setSyncMeta(key: string, value: string) {
     .run();
 }
 
+import { getTenantId } from "@/lib/db/repositories/settings";
+
 export function getSyncStatusSnapshot() {
   return {
     pendingCount: getPendingSyncCount(),
@@ -49,6 +51,7 @@ export function getSyncStatusSnapshot() {
     lastSyncStartedAt: getSyncMeta(META_KEYS.lastSyncStartedAt),
     lastSyncCompletedAt: getSyncMeta(META_KEYS.lastSyncCompletedAt),
     lastSyncError: getSyncMeta(META_KEYS.lastSyncError),
+    tenantId: getTenantId(),
   };
 }
 

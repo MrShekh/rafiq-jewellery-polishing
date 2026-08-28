@@ -9,6 +9,7 @@ export interface SyncStatus {
   lastSyncCompletedAt: string | null;
   lastSyncError: string | null;
   cloudSyncConfigured: boolean;
+  tenantId?: string;
 }
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json());

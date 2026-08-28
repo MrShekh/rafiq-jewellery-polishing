@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import { settings } from "@/db/schema";
 import { db } from "@/lib/db/client";
 import { DEFAULT_PRECISION, type FormulaVersion, type PrecisionPolicy } from "@/lib/calculations";
+import { nanoid } from "nanoid";
 
 /**
  * Typed accessors over the flexible `settings` key/value table. Business
@@ -88,4 +89,13 @@ export function isFirstRunComplete(): boolean {
 
 export function markFirstRunComplete() {
   setSetting(SETTINGS_KEYS.firstRunComplete, "true");
+}
+
+export function getTenantId(): string {
+  let tenantId = getSetting("app.tenant_id");
+  if (!tenantId) {
+    tenantId = "tenant_" + nanoid();
+    setSetting("app.tenant_id", tenantId);
+  }
+  return tenantId;
 }

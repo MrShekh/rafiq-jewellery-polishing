@@ -4,7 +4,8 @@ import { syncQueue, customers, orders } from "@/db/schema";
 import { db } from "@/lib/db/client";
 import { logger } from "@/lib/logger";
 import { getMongoDb, isCloudSyncConfigured, pingMongo } from "@/lib/sync/mongo";
-import { SYNC_META_KEYS, setSyncMeta } from "@/lib/db/repositories/sync";
+import { SYNC_META_KEYS, setSyncMeta, getSyncMeta } from "@/lib/db/repositories/sync";
+import { getTenantId, getBusinessProfile } from "@/lib/db/repositories/settings";
 
 /**
  * Offline-first sync engine (brief sections 7, 23-26).
@@ -59,9 +60,12 @@ class MongoSyncTarget implements SyncTarget {
   async upsert(entityType: "customer" | "order", entityId: string, doc: Record<string, unknown>) {
     const database = await getMongoDb();
     const collection = database.collection<SyncDoc>(entityType === "order" ? "orders" : "customers");
+    const tenantId = getTenantId();
+    const profile = getBusinessProfile();
+    const businessName = profile.name || "Unknown Business";
     await collection.updateOne(
       { _id: entityId },
-      { $set: { ...doc, _id: entityId } },
+      { $set: { ...doc, _id: entityId, tenantId, businessName } },
       { upsert: true },
     );
   }
@@ -69,11 +73,14 @@ class MongoSyncTarget implements SyncTarget {
   async delete(entityType: "customer" | "order", entityId: string) {
     const database = await getMongoDb();
     const collection = database.collection<SyncDoc>(entityType === "order" ? "orders" : "customers");
+    const tenantId = getTenantId();
+    const profile = getBusinessProfile();
+    const businessName = profile.name || "Unknown Business";
     // Cloud side mirrors the soft-delete rather than a hard remove, so a
     // future "restore" or audit on the cloud side is still possible.
     await collection.updateOne(
       { _id: entityId },
-      { $set: { _id: entityId, deletedAt: new Date().toISOString() } },
+      { $set: { _id: entityId, tenantId, businessName, deletedAt: new Date().toISOString() } },
       { upsert: true },
     );
   }
@@ -89,6 +96,104 @@ export interface SyncCycleResult {
   processed: number;
   succeeded: number;
   failed: number;
+}
+
+async function pullFromCloud(syncTarget: SyncTarget, lastSyncTime: string | null) {
+  if (!(syncTarget instanceof MongoSyncTarget)) {
+    return;
+  }
+
+  const database = await getMongoDb();
+  const tenantId = getTenantId();
+
+  // 1. Pull Customers
+  const customersCollection = database.collection<SyncDoc>("customers");
+  const customerQuery = lastSyncTime
+    ? { tenantId, updatedAt: { $gt: lastSyncTime } }
+    : { tenantId };
+  const cloudCustomers = await customersCollection.find(customerQuery).toArray();
+
+  for (const doc of cloudCustomers) {
+    const local = db.select().from(customers).where(eq(customers.id, doc._id)).get();
+    if (!local || new Date(doc.updatedAt as string) > new Date(local.updatedAt)) {
+      const values = {
+        id: doc._id,
+        name: doc.name as string,
+        phone: (doc.phone as string) || null,
+        address: (doc.address as string) || null,
+        notes: (doc.notes as string) || null,
+        isActive: doc.isActive !== undefined ? Boolean(doc.isActive) : true,
+        syncStatus: "synced" as const,
+        lastSyncedAt: new Date().toISOString(),
+        syncAttempts: 0,
+        lastSyncError: null,
+        createdAt: (doc.createdAt as string) || new Date().toISOString(),
+        updatedAt: (doc.updatedAt as string) || new Date().toISOString(),
+        deletedAt: (doc.deletedAt as string) || null,
+      };
+
+      db.transaction((tx) => {
+        tx.insert(customers)
+          .values(values)
+          .onConflictDoUpdate({
+            target: customers.id,
+            set: values,
+          })
+          .run();
+      });
+    }
+  }
+
+  // 2. Pull Orders
+  const ordersCollection = database.collection<SyncDoc>("orders");
+  const orderQuery = lastSyncTime
+    ? { tenantId, updatedAt: { $gt: lastSyncTime } }
+    : { tenantId };
+  const cloudOrders = await ordersCollection.find(orderQuery).toArray();
+
+  for (const doc of cloudOrders) {
+    const local = db.select().from(orders).where(eq(orders.id, doc._id)).get();
+    if (!local || new Date(doc.updatedAt as string) > new Date(local.updatedAt)) {
+      const values = {
+        id: doc._id,
+        orderNumber: doc.orderNumber as string,
+        orderDate: doc.orderDate as string,
+        customerId: doc.customerId as string,
+        customerNameSnapshot: doc.customerNameSnapshot as string,
+        item: doc.item as string,
+        pieces: Number(doc.pieces),
+        weightIn: String(doc.weightIn),
+        weightOut: String(doc.weightOut),
+        makingCharge: String(doc.makingCharge),
+        loss: String(doc.loss),
+        touch: String(doc.touch),
+        fineTotal: String(doc.fineTotal),
+        weightIn2: doc.weightIn2 ? String(doc.weightIn2) : null,
+        weightOut2: doc.weightOut2 ? String(doc.weightOut2) : null,
+        weightExceedsConfirmed: doc.weightExceedsConfirmed !== undefined ? Boolean(doc.weightExceedsConfirmed) : false,
+        notes: (doc.notes as string) || null,
+        syncStatus: "synced" as const,
+        lastSyncedAt: new Date().toISOString(),
+        syncAttempts: 0,
+        lastSyncError: null,
+        createdBy: (doc.createdBy as string) || null,
+        updatedBy: (doc.updatedBy as string) || null,
+        createdAt: (doc.createdAt as string) || new Date().toISOString(),
+        updatedAt: (doc.updatedAt as string) || new Date().toISOString(),
+        deletedAt: (doc.deletedAt as string) || null,
+      };
+
+      db.transaction((tx) => {
+        tx.insert(orders)
+          .values(values)
+          .onConflictDoUpdate({
+            target: orders.id,
+            set: values,
+          })
+          .run();
+      });
+    }
+  }
 }
 
 export async function runSyncCycle(target?: SyncTarget): Promise<SyncCycleResult> {
@@ -180,6 +285,16 @@ export async function runSyncCycle(target?: SyncTarget): Promise<SyncCycleResult
       logger.error("Sync row failed", { queueId: row.id, entityType: row.entityType, entityId: row.entityId, attempts, error: message });
       failed += 1;
     }
+  }
+
+  // Pull new/updated records from the cloud
+  try {
+    const lastSyncTime = getSyncMeta(SYNC_META_KEYS.lastSyncCompletedAt);
+    await pullFromCloud(syncTarget, lastSyncTime);
+  } catch (err) {
+    logger.error("Failed to pull from cloud during sync cycle", {
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
 
   setSyncMeta(SYNC_META_KEYS.lastSyncCompletedAt, new Date().toISOString());

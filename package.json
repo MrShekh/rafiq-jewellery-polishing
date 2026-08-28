@@ -1,6 +1,6 @@
 {
   "name": "jewellery-polishing-app",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "description": "Offline-first order registry and workshop management for jewellery polishing businesses.",
   "author": "Jewellery Polishing Manager",
   "private": true,
@@ -13,6 +13,7 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "test:db": "vitest run --config vitest.db.config.mts",
     "test:watch": "vitest",
     "db:generate": "drizzle-kit generate",
     "db:studio": "drizzle-kit studio",
