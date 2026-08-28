@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { handleApiError, ok } from "@/lib/api/respond";
 import { requireUser } from "@/lib/auth/session";
-import { getSyncStatusSnapshot } from "@/lib/db/repositories/sync";
+import { getSyncStatusSnapshot, setSyncMeta, SYNC_META_KEYS } from "@/lib/db/repositories/sync";
 import { isCloudSyncConfigured } from "@/lib/sync/mongo";
 import { setSetting } from "@/lib/db/repositories/settings";
 
@@ -27,6 +27,8 @@ export async function POST(req: Request) {
     await requireUser();
     const body = tenantSchema.parse(await req.json());
     setSetting("app.tenant_id", body.tenantId);
+    // Reset last sync completed time so the next sync cycle pulls all records for the new tenant
+    setSyncMeta(SYNC_META_KEYS.lastSyncCompletedAt, "");
     return ok({ success: true });
   } catch (err) {
     return handleApiError(err);

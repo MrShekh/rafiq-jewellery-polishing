@@ -1,6 +1,6 @@
 import { and, eq, isNull, lte, or } from "drizzle-orm";
 
-import { syncQueue, customers, orders } from "@/db/schema";
+import { syncQueue, customers, orders, users } from "@/db/schema";
 import { db } from "@/lib/db/client";
 import { logger } from "@/lib/logger";
 import { getMongoDb, isCloudSyncConfigured, pingMongo } from "@/lib/sync/mongo";
@@ -154,6 +154,19 @@ async function pullFromCloud(syncTarget: SyncTarget, lastSyncTime: string | null
   for (const doc of cloudOrders) {
     const local = db.select().from(orders).where(eq(orders.id, doc._id)).get();
     if (!local || new Date(doc.updatedAt as string) > new Date(local.updatedAt)) {
+      // Nullify createdBy/updatedBy if user IDs don't exist locally – prevents FK violations
+      let createdBy = (doc.createdBy as string) || null;
+      if (createdBy) {
+        const userExists = db.select().from(users).where(eq(users.id, createdBy)).get();
+        if (!userExists) createdBy = null;
+      }
+
+      let updatedBy = (doc.updatedBy as string) || null;
+      if (updatedBy) {
+        const userExists = db.select().from(users).where(eq(users.id, updatedBy)).get();
+        if (!userExists) updatedBy = null;
+      }
+
       const values = {
         id: doc._id,
         orderNumber: doc.orderNumber as string,
@@ -176,8 +189,8 @@ async function pullFromCloud(syncTarget: SyncTarget, lastSyncTime: string | null
         lastSyncedAt: new Date().toISOString(),
         syncAttempts: 0,
         lastSyncError: null,
-        createdBy: (doc.createdBy as string) || null,
-        updatedBy: (doc.updatedBy as string) || null,
+        createdBy,
+        updatedBy,
         createdAt: (doc.createdAt as string) || new Date().toISOString(),
         updatedAt: (doc.updatedAt as string) || new Date().toISOString(),
         deletedAt: (doc.deletedAt as string) || null,
@@ -186,10 +199,7 @@ async function pullFromCloud(syncTarget: SyncTarget, lastSyncTime: string | null
       db.transaction((tx) => {
         tx.insert(orders)
           .values(values)
-          .onConflictDoUpdate({
-            target: orders.id,
-            set: values,
-          })
+          .onConflictDoUpdate({ target: orders.id, set: values })
           .run();
       });
     }
