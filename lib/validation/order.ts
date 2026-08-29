@@ -11,6 +11,14 @@ const isoDate = z
   .string()
   .regex(/^\d{4}-\d{2}-\d{2}$/, "Date must be in YYYY-MM-DD format");
 
+const isoDateFilter = z
+  .string()
+  .trim()
+  .optional()
+  .nullable()
+  .transform((val) => (val === "" || val === null ? undefined : val))
+  .pipe(z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Date must be in YYYY-MM-DD format").optional());
+
 const nonNegativeDecimalString = z
   .string()
   .trim()
@@ -116,11 +124,11 @@ export const orderUpdateSchema = orderObjectSchema
   .superRefine(applyOrderCrossFieldRules);
 
 export const orderFilterSchema = z.object({
-  search: z.string().optional(),
-  customerId: z.string().optional(),
-  item: z.string().optional(),
-  dateFrom: isoDate.optional(),
-  dateTo: isoDate.optional(),
+  search: z.string().optional().transform((val) => val === "" ? undefined : val),
+  customerId: z.string().optional().transform((val) => val === "" ? undefined : val),
+  item: z.string().optional().transform((val) => val === "" ? undefined : val),
+  dateFrom: isoDateFilter,
+  dateTo: isoDateFilter,
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(1000).default(200),
   sortBy: z
