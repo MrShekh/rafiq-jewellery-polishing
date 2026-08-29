@@ -1,11 +1,12 @@
 import { and, eq, isNull, lte, or } from "drizzle-orm";
+import { nanoid } from "nanoid";
 
 import { syncQueue, customers, orders, users } from "@/db/schema";
 import { db } from "@/lib/db/client";
 import { logger } from "@/lib/logger";
-import { getMongoDb, isCloudSyncConfigured, pingMongo } from "@/lib/sync/mongo";
+import { isCloudSyncConfigured, pingMongo } from "@/lib/sync/mongo";
+import { pushRecord, pushDelete, pullChanges, type CloudDoc } from "@/lib/sync/cloud";
 import { SYNC_META_KEYS, setSyncMeta, getSyncMeta } from "@/lib/db/repositories/sync";
-import { getTenantId, getBusinessProfile } from "@/lib/db/repositories/settings";
 
 /**
  * Offline-first sync engine (brief sections 7, 23-26).
@@ -47,42 +48,21 @@ export interface SyncTarget {
   delete(entityType: "customer" | "order", entityId: string): Promise<void>;
 }
 
-/** Real MongoDB-backed target used in production.
+/** Real MongoDB-backed target used in production. Thin wrapper over
+ * lib/sync/cloud.ts, which is also what app/api/sync/push and
+ * app/api/sync/pull call - one implementation of "how a record is shaped
+ * in Mongo and how tenant scoping works", not two that can drift apart.
  *
- * We key documents by our own client-generated `_id` (a string, not
- * Mongo's default ObjectId) so upserts are keyed on the exact id
- * lib/db/schema.ts already assigned locally - that's what makes sync
- * idempotent (section 24). `Collection<{ _id: string }>` tells the driver
- * to treat `_id` as a plain string instead of inferring ObjectId. */
-type SyncDoc = { _id: string } & Record<string, unknown>;
-
+ * We key documents by our own client-generated id (a string, not Mongo's
+ * default ObjectId) so upserts are keyed on the exact id lib/db/schema.ts
+ * already assigned locally - that's what makes sync idempotent (section 24). */
 class MongoSyncTarget implements SyncTarget {
   async upsert(entityType: "customer" | "order", entityId: string, doc: Record<string, unknown>) {
-    const database = await getMongoDb();
-    const collection = database.collection<SyncDoc>(entityType === "order" ? "orders" : "customers");
-    const tenantId = getTenantId();
-    const profile = getBusinessProfile();
-    const businessName = profile.name || "Unknown Business";
-    await collection.updateOne(
-      { _id: entityId },
-      { $set: { ...doc, _id: entityId, tenantId, businessName } },
-      { upsert: true },
-    );
+    await pushRecord(entityType, entityId, doc);
   }
 
   async delete(entityType: "customer" | "order", entityId: string) {
-    const database = await getMongoDb();
-    const collection = database.collection<SyncDoc>(entityType === "order" ? "orders" : "customers");
-    const tenantId = getTenantId();
-    const profile = getBusinessProfile();
-    const businessName = profile.name || "Unknown Business";
-    // Cloud side mirrors the soft-delete rather than a hard remove, so a
-    // future "restore" or audit on the cloud side is still possible.
-    await collection.updateOne(
-      { _id: entityId },
-      { $set: { _id: entityId, tenantId, businessName, deletedAt: new Date().toISOString() } },
-      { upsert: true },
-    );
+    await pushDelete(entityType, entityId);
   }
 }
 
@@ -98,109 +78,131 @@ export interface SyncCycleResult {
   failed: number;
 }
 
+/** Merges one pulled customer document into local SQLite. Last-write-wins
+ * on `updatedAt` (see module doc comment for the conflict strategy): a
+ * remote doc only overwrites the local row if it is strictly newer, so a
+ * pull can never clobber a local edit make since the last successful sync. */
+export function applyCustomer(doc: CloudDoc) {
+  const local = db.select().from(customers).where(eq(customers.id, doc._id)).get();
+  if (local && new Date(doc.updatedAt as string) <= new Date(local.updatedAt)) return;
+
+  const values = {
+    id: doc._id,
+    name: doc.name as string,
+    phone: (doc.phone as string) || null,
+    address: (doc.address as string) || null,
+    notes: (doc.notes as string) || null,
+    isActive: doc.isActive !== undefined ? Boolean(doc.isActive) : true,
+    syncStatus: "synced" as const,
+    lastSyncedAt: new Date().toISOString(),
+    syncAttempts: 0,
+    lastSyncError: null,
+    createdAt: (doc.createdAt as string) || new Date().toISOString(),
+    updatedAt: (doc.updatedAt as string) || new Date().toISOString(),
+    deletedAt: (doc.deletedAt as string) || null,
+  };
+
+  db.transaction((tx) => {
+    tx.insert(customers).values(values).onConflictDoUpdate({ target: customers.id, set: values }).run();
+  });
+}
+
+/** Merges one pulled order document into local SQLite (same last-write-wins
+ * rule as applyCustomer). `orderNumber` is a human-facing per-day sequence
+ * generated independently by every device (lib/ids/orderId.ts); two
+ * offline devices can legitimately produce the same one on the same day.
+ * That collides on the unique index - rather than losing the incoming
+ * record (or aborting the rest of the pull), we disambiguate it with a
+ * short suffix and log it so it's discoverable and correctable later,
+ * instead of silently dropping cloud data. */
+export function applyOrder(doc: CloudDoc) {
+  const local = db.select().from(orders).where(eq(orders.id, doc._id)).get();
+  if (local && new Date(doc.updatedAt as string) <= new Date(local.updatedAt)) return;
+
+  // Nullify createdBy/updatedBy if user IDs don't exist locally - prevents FK violations
+  let createdBy = (doc.createdBy as string) || null;
+  if (createdBy && !db.select().from(users).where(eq(users.id, createdBy)).get()) createdBy = null;
+
+  let updatedBy = (doc.updatedBy as string) || null;
+  if (updatedBy && !db.select().from(users).where(eq(users.id, updatedBy)).get()) updatedBy = null;
+
+  const values = {
+    id: doc._id,
+    orderNumber: doc.orderNumber as string,
+    orderDate: doc.orderDate as string,
+    customerId: doc.customerId as string,
+    customerNameSnapshot: doc.customerNameSnapshot as string,
+    item: doc.item as string,
+    pieces: Number(doc.pieces),
+    weightIn: String(doc.weightIn),
+    weightOut: String(doc.weightOut),
+    makingCharge: String(doc.makingCharge),
+    loss: String(doc.loss),
+    touch: String(doc.touch),
+    fineTotal: String(doc.fineTotal),
+    weightIn2: doc.weightIn2 ? String(doc.weightIn2) : null,
+    weightOut2: doc.weightOut2 ? String(doc.weightOut2) : null,
+    weightExceedsConfirmed: doc.weightExceedsConfirmed !== undefined ? Boolean(doc.weightExceedsConfirmed) : false,
+    notes: (doc.notes as string) || null,
+    syncStatus: "synced" as const,
+    lastSyncedAt: new Date().toISOString(),
+    syncAttempts: 0,
+    lastSyncError: null,
+    createdBy,
+    updatedBy,
+    createdAt: (doc.createdAt as string) || new Date().toISOString(),
+    updatedAt: (doc.updatedAt as string) || new Date().toISOString(),
+    deletedAt: (doc.deletedAt as string) || null,
+  };
+
+  try {
+    db.transaction((tx) => {
+      tx.insert(orders).values(values).onConflictDoUpdate({ target: orders.id, set: values }).run();
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (!message.includes("orders_order_number_idx") && !message.includes("UNIQUE constraint")) throw err;
+
+    const disambiguated = `${values.orderNumber}-R${nanoid(4)}`;
+    logger.warn("Pulled order number collided with a locally-generated one; disambiguating", {
+      orderId: values.id,
+      original: values.orderNumber,
+      renamed: disambiguated,
+    });
+    db.transaction((tx) => {
+      tx.insert(orders)
+        .values({ ...values, orderNumber: disambiguated })
+        .onConflictDoUpdate({ target: orders.id, set: { ...values, orderNumber: disambiguated } })
+        .run();
+    });
+  }
+}
+
 async function pullFromCloud(syncTarget: SyncTarget, lastSyncTime: string | null) {
   if (!(syncTarget instanceof MongoSyncTarget)) {
     return;
   }
 
-  const database = await getMongoDb();
-  const tenantId = getTenantId();
-
-  // 1. Pull Customers
-  const customersCollection = database.collection<SyncDoc>("customers");
-  const customerQuery = lastSyncTime
-    ? { tenantId, updatedAt: { $gt: lastSyncTime } }
-    : { tenantId };
-  const cloudCustomers = await customersCollection.find(customerQuery).toArray();
+  const { customers: cloudCustomers, orders: cloudOrders } = await pullChanges(lastSyncTime);
 
   for (const doc of cloudCustomers) {
-    const local = db.select().from(customers).where(eq(customers.id, doc._id)).get();
-    if (!local || new Date(doc.updatedAt as string) > new Date(local.updatedAt)) {
-      const values = {
-        id: doc._id,
-        name: doc.name as string,
-        phone: (doc.phone as string) || null,
-        address: (doc.address as string) || null,
-        notes: (doc.notes as string) || null,
-        isActive: doc.isActive !== undefined ? Boolean(doc.isActive) : true,
-        syncStatus: "synced" as const,
-        lastSyncedAt: new Date().toISOString(),
-        syncAttempts: 0,
-        lastSyncError: null,
-        createdAt: (doc.createdAt as string) || new Date().toISOString(),
-        updatedAt: (doc.updatedAt as string) || new Date().toISOString(),
-        deletedAt: (doc.deletedAt as string) || null,
-      };
-
-      db.transaction((tx) => {
-        tx.insert(customers)
-          .values(values)
-          .onConflictDoUpdate({
-            target: customers.id,
-            set: values,
-          })
-          .run();
+    try {
+      applyCustomer(doc);
+    } catch (err) {
+      logger.error("Failed to apply pulled customer", {
+        customerId: doc._id,
+        error: err instanceof Error ? err.message : String(err),
       });
     }
   }
 
-  // 2. Pull Orders
-  const ordersCollection = database.collection<SyncDoc>("orders");
-  const orderQuery = lastSyncTime
-    ? { tenantId, updatedAt: { $gt: lastSyncTime } }
-    : { tenantId };
-  const cloudOrders = await ordersCollection.find(orderQuery).toArray();
-
   for (const doc of cloudOrders) {
-    const local = db.select().from(orders).where(eq(orders.id, doc._id)).get();
-    if (!local || new Date(doc.updatedAt as string) > new Date(local.updatedAt)) {
-      // Nullify createdBy/updatedBy if user IDs don't exist locally – prevents FK violations
-      let createdBy = (doc.createdBy as string) || null;
-      if (createdBy) {
-        const userExists = db.select().from(users).where(eq(users.id, createdBy)).get();
-        if (!userExists) createdBy = null;
-      }
-
-      let updatedBy = (doc.updatedBy as string) || null;
-      if (updatedBy) {
-        const userExists = db.select().from(users).where(eq(users.id, updatedBy)).get();
-        if (!userExists) updatedBy = null;
-      }
-
-      const values = {
-        id: doc._id,
-        orderNumber: doc.orderNumber as string,
-        orderDate: doc.orderDate as string,
-        customerId: doc.customerId as string,
-        customerNameSnapshot: doc.customerNameSnapshot as string,
-        item: doc.item as string,
-        pieces: Number(doc.pieces),
-        weightIn: String(doc.weightIn),
-        weightOut: String(doc.weightOut),
-        makingCharge: String(doc.makingCharge),
-        loss: String(doc.loss),
-        touch: String(doc.touch),
-        fineTotal: String(doc.fineTotal),
-        weightIn2: doc.weightIn2 ? String(doc.weightIn2) : null,
-        weightOut2: doc.weightOut2 ? String(doc.weightOut2) : null,
-        weightExceedsConfirmed: doc.weightExceedsConfirmed !== undefined ? Boolean(doc.weightExceedsConfirmed) : false,
-        notes: (doc.notes as string) || null,
-        syncStatus: "synced" as const,
-        lastSyncedAt: new Date().toISOString(),
-        syncAttempts: 0,
-        lastSyncError: null,
-        createdBy,
-        updatedBy,
-        createdAt: (doc.createdAt as string) || new Date().toISOString(),
-        updatedAt: (doc.updatedAt as string) || new Date().toISOString(),
-        deletedAt: (doc.deletedAt as string) || null,
-      };
-
-      db.transaction((tx) => {
-        tx.insert(orders)
-          .values(values)
-          .onConflictDoUpdate({ target: orders.id, set: values })
-          .run();
+    try {
+      applyOrder(doc);
+    } catch (err) {
+      logger.error("Failed to apply pulled order", {
+        orderId: doc._id,
+        error: err instanceof Error ? err.message : String(err),
       });
     }
   }

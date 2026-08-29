@@ -25,6 +25,12 @@ export default function LoginPage() {
     try {
       await api.post("/api/auth/login", { username, password });
       refresh();
+      // Fire-and-forget: pulls in anything created elsewhere (e.g. the web
+      // app) since this device's last sync, without making the user wait
+      // for it. The periodic background sync (instrumentation.ts) and the
+      // reconnect listener (components/providers/sync-trigger.tsx) cover
+      // everything after this first login.
+      api.post("/api/sync/run").catch(() => {});
       router.push("/orders");
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Login failed.");

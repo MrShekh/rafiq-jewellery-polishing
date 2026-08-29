@@ -3,9 +3,18 @@ import { z } from "zod";
 
 import { handleApiError, ok } from "@/lib/api/respond";
 import { hasAnyUser, createAdminUser } from "@/lib/db/repositories/users";
-import { setBusinessProfile, markFirstRunComplete, isFirstRunComplete } from "@/lib/db/repositories/settings";
+import {
+  setBusinessProfile,
+  markFirstRunComplete,
+  isFirstRunComplete,
+  getTenantId,
+  setTenantId,
+} from "@/lib/db/repositories/settings";
 import { createSession } from "@/lib/auth/session";
 import { validatePasswordStrength } from "@/lib/auth/password";
+import { linkOrRegisterAccount } from "@/lib/sync/accounts";
+import { runSyncCycle } from "@/lib/sync/engine";
+import { logger } from "@/lib/logger";
 
 // Always dynamic: every route here reads the session cookie and/or hits
 // SQLite directly, so there is nothing safe to prerender or cache.
@@ -54,7 +63,37 @@ export async function POST(req: NextRequest) {
     markFirstRunComplete();
     await createSession(admin.id);
 
-    return ok({ success: true });
+    // Section 6/7 of the brief: a device setting up with the same
+    // username+password as an already-registered business should adopt that
+    // business's tenantId, not a fresh random one, so it can actually see
+    // that business's cloud data. See lib/sync/accounts.ts for why this is
+    // safe (password-verified, not username-only) and why it never blocks
+    // offline setup.
+    const { tenantId, linkedExistingBusiness } = await linkOrRegisterAccount(
+      body.adminUsername,
+      body.adminPassword,
+      getTenantId(),
+      body.businessName,
+    );
+    if (linkedExistingBusiness) {
+      setTenantId(tenantId);
+    }
+
+    // Kick off the initial sync now, before responding to "done": if we
+    // just linked to an existing business, this is what actually pulls its
+    // customers/orders down into this device's empty SQLite (section 6,
+    // "Initial Sync"). Never blocks setup on failure - the engine itself is
+    // offline-safe and any error here just means the periodic background
+    // sync (instrumentation.ts) picks it up shortly after.
+    try {
+      await runSyncCycle();
+    } catch (err) {
+      logger.warn("Initial sync after first-run setup failed; will retry in the background", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+
+    return ok({ success: true, linkedExistingBusiness });
   } catch (err) {
     return handleApiError(err);
   }

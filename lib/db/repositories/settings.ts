@@ -99,3 +99,7 @@ export function getTenantId(): string {
   }
   return tenantId;
 }
+
+export function setTenantId(tenantId: string) {
+  setSetting("app.tenant_id", tenantId);
+}

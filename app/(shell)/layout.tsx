@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/auth/session";
 import { Sidebar } from "@/components/layout/sidebar";
 import { Topbar } from "@/components/layout/topbar";
+import { SyncTrigger } from "@/components/providers/sync-trigger";
 
 // This layout reads the session from SQLite at runtime — never statically pre-render.
 export const dynamic = "force-dynamic";
@@ -15,6 +16,7 @@ export default async function ShellLayout({ children }: { children: React.ReactN
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-background">
+      <SyncTrigger />
       <Sidebar user={user} />
       <div className="flex min-w-0 flex-1 flex-col">
         <Topbar />

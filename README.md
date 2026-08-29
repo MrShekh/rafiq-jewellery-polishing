@@ -24,7 +24,10 @@ visual polish**.
   app version/updates.
 - **Local-first storage**: SQLite via Drizzle ORM (WAL mode), with a
   transactional outbox (`sync_queue`) feeding an optional MongoDB Atlas sync
-  engine - the app is fully usable with zero internet connectivity.
+  engine - the app is fully usable with zero internet connectivity. Sync runs
+  automatically (server startup via `instrumentation.ts`, every 60s while
+  running, right after login, and on network reconnect) as well as on-demand
+  via Settings > Sync > "Sync now" - see `lib/sync/engine.ts`.
 - **Backup & restore**: on-demand zip backups (SQLite's own online backup
   API, not a raw file copy), and a restore flow that always takes a safety
   backup of the current database before staging a replacement.
@@ -125,26 +128,45 @@ cloud sync.
 | `MONGODB_URI` | No | Enables cloud sync/backup to MongoDB Atlas. Without it, the app runs entirely offline and Settings > Sync shows "Local only". |
 | `USER_DATA_PATH` | No (set automatically by Electron) | Where the SQLite DB, logs, and backups live. Defaults to `./.data` when running standalone (`next dev`/`next start`) outside Electron. |
 
-To enable cloud sync, create a free MongoDB Atlas cluster, get its
-connection string, and put it in `.env` as `MONGODB_URI=...` (see
-`.env.example`). Do this **before** running `npm run build`: the postbuild
-step (`scripts/copy-standalone-assets.mjs`) copies your `.env` file into the
-standalone server output, the same way it already copies `public/` and the
-built CSS/JS - Next's standalone server reads `.env` files from its own
-folder at startup, not from wherever `npm run build` happened to run. If you
-change `.env` later, rebuild (`npm run build`) and repackage
+To enable cloud sync for the **web/server deployment** (`next start`, or an
+unpackaged `electron:dev`/`electron:pack:dir` run against `.next/standalone`
+directly - a server you control), create a free MongoDB Atlas cluster, get
+its connection string, and put it in `.env` as `MONGODB_URI=...` (see
+`.env.example`). Next's standalone server reads `.env` files from its own
+folder at startup, not from wherever `npm run build` happened to run.
+
+**The packaged desktop installer (`electron:pack`) does NOT inherit `.env`.**
+`scripts/copy-standalone-assets.mjs` deliberately strips `.env`/`.env.local`/
+`.env.production(.local)` from the staged `build-stage/pkg` folder before
+electron-builder ships it, because that folder is unencrypted inside the
+installed app - anyone with the installed EXE could otherwise read a live
+Atlas connection string off disk. To enable cloud sync in the **shipped
+installer**, create a separate `.env.desktop` file (same `MONGODB_URI=`
+format) - only that file gets copied in, and only when you explicitly create
+it. Use a least-privilege Atlas database user for it (read/write on this
+app's collections only), since it will exist on every installed copy. If you
+change either file, rebuild (`npm run build`) and repackage
 (`npm run electron:pack`) to pick up the change - a client can't edit it
 after installing, since it's a packaged app, not a folder of loose config.
 
-**Multi-client note:** if you're distributing this to several separate
-jewellery businesses (each their own "client"), think carefully before
-baking a shared `MONGODB_URI` into the build you hand out - every install
-from that same build would sync to the *same* cloud database, with orders
-and customers from different businesses landing in the same collections
-(there's no per-business separation in the schema). For genuinely separate
-clients, either leave `.env` unset entirely (each install just runs
-offline-only, which is fully supported) or give each client their own
-build with their own separate MongoDB Atlas cluster in its `.env`.
+**Multi-tenant isolation:** every record synced to Mongo is stamped with a
+`tenantId` (Settings > Sync > "Multi-Device Sync ID"), and every push/pull
+is filtered by it (`lib/sync/cloud.ts`) - so multiple businesses safely share
+one Atlas cluster/database without seeing each other's customers or orders,
+even with the same `MONGODB_URI` baked into a build you hand out to several
+clients. A device's `tenantId` is normally set once, automatically, the
+first time its admin account is created: first-run setup
+(`app/api/setup/route.ts`) checks Mongo for an existing business already
+registered under that exact username+password (`lib/sync/accounts.ts`) and,
+if found, adopts its `tenantId` instead of generating a new random one -
+this is what makes "log into the web app, then install the desktop app and
+log in with the same credentials" actually share data without any manual
+step. A same username with a *different* password is treated as an
+unrelated business and gets its own new `tenantId`, which is what prevents
+two strangers who happen to pick the same admin username from being merged
+into one tenant. The Sync ID field itself remains available for manually
+linking/relinking a device (e.g. after a factory-reset install, or to
+deliberately point one device at a different business).
 
 ## Auto-updates
 

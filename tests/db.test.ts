@@ -11,6 +11,13 @@ import { beforeAll, afterAll, describe, expect, it } from "vitest";
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "jp-db-test-"));
 process.env.USER_DATA_PATH = tmpDir;
 
+// See lib/db/client.ts:__resetConnectionForTests - required because this
+// suite runs in the same worker process as tests/sync.test.ts (isolate:
+// false in vitest.db.config.mts), so the DB connection singleton would
+// otherwise be shared between the two files.
+const { __resetConnectionForTests } = await import("@/lib/db/client");
+__resetConnectionForTests();
+
 const { createCustomer, listCustomers, softDeleteCustomer } = await import("@/lib/db/repositories/customers");
 const { createOrder, updateOrder, softDeleteOrder, listOrders } = await import("@/lib/db/repositories/orders");
 const { getTodaySummary } = await import("@/lib/db/repositories/dashboard");
@@ -114,5 +121,8 @@ describe("customers + orders CRUD", () => {
 });
 
 afterAll(() => {
+  // Close the SQLite handle before deleting its directory - Windows refuses
+  // to remove a file that's still open (EPERM), unlike POSIX.
+  __resetConnectionForTests();
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });

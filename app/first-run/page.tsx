@@ -32,6 +32,7 @@ export default function FirstRunPage() {
   const [adminUsername, setAdminUsername] = React.useState("");
   const [adminPassword, setAdminPassword] = React.useState("");
   const [adminPasswordConfirm, setAdminPasswordConfirm] = React.useState("");
+  const [linkedExistingBusiness, setLinkedExistingBusiness] = React.useState(false);
 
   async function handleFinish() {
     if (adminPassword !== adminPasswordConfirm) {
@@ -40,7 +41,7 @@ export default function FirstRunPage() {
     }
     setSubmitting(true);
     try {
-      await api.post("/api/setup", {
+      const result = await api.post<{ success: boolean; linkedExistingBusiness: boolean }>("/api/setup", {
         businessName,
         businessAddress,
         businessPhone,
@@ -48,6 +49,7 @@ export default function FirstRunPage() {
         adminDisplayName,
         adminPassword,
       });
+      setLinkedExistingBusiness(result.linkedExistingBusiness);
       setStep("done");
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Setup failed. Please try again.");
@@ -187,7 +189,10 @@ export default function FirstRunPage() {
               <CheckCircle2 className="mx-auto h-10 w-10 text-success" />
               <h1 className="text-xl font-semibold">You&apos;re all set</h1>
               <p className="text-sm text-muted-foreground">
-                {businessName} is ready to go. Let&apos;s open the Order Registry.
+                {linkedExistingBusiness
+                  ? `We found ${businessName}'s existing cloud data and are syncing it to this computer now.`
+                  : `${businessName} is ready to go.`}{" "}
+                Let&apos;s open the Order Registry.
               </p>
               <Button className="w-full" onClick={() => router.push("/orders")}>
                 Open Order Registry

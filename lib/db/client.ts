@@ -64,6 +64,35 @@ function getConnection() {
 }
 
 /**
+ * Test-only escape hatch. vitest.db.config.mts runs every DB-touching test
+ * file in one shared worker process with `isolate: false` (on purpose - so
+ * better-sqlite3's native addon is only ever loaded into one V8 context per
+ * process, which is what native N-API addons require to behave reliably).
+ * That means this module's `globalThis` cache - and therefore its open
+ * SQLite file handle - is shared across test files too, so a later file's
+ * own `USER_DATA_PATH` override would otherwise be silently ignored (it
+ * would keep reading/writing the *first* file's database) and, on Windows,
+ * that same still-open handle is what makes `fs.rmSync(tmpDir)` fail with
+ * EPERM in a later file's cleanup.
+ *
+ * Each test file must call this immediately after setting its own
+ * `USER_DATA_PATH` and before importing anything that touches the database,
+ * so it gets its own fresh connection to its own temp directory. Not used
+ * by any non-test code path.
+ */
+export function __resetConnectionForTests() {
+  if (globalThis.__jewellerySqlite) {
+    try {
+      globalThis.__jewellerySqlite.close();
+    } catch {
+      // Already closed or never fully opened - nothing left to clean up.
+    }
+  }
+  globalThis.__jewelleryDb = undefined;
+  globalThis.__jewellerySqlite = undefined;
+}
+
+/**
  * Lazily-resolved exports — the connection is only opened the first time
  * `db` or `sqlite` is actually accessed inside a request handler, NOT when
  * this module is imported.  Without this guard the Next.js build worker

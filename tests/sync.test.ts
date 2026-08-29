@@ -14,10 +14,20 @@ process.env.USER_DATA_PATH = tmpDir;
 // real Mongo connection is ever attempted in this test.
 process.env.MONGODB_URI = "mongodb://fake-for-tests";
 
+// See lib/db/client.ts:__resetConnectionForTests - required because this
+// suite runs in the same worker process as tests/db.test.ts (isolate: false
+// in vitest.db.config.mts), so the DB connection singleton would otherwise
+// be shared between the two files (and its sync_queue rows would leak in).
+const { __resetConnectionForTests } = await import("@/lib/db/client");
+__resetConnectionForTests();
+
 const { createCustomer } = await import("@/lib/db/repositories/customers");
 const { createOrder } = await import("@/lib/db/repositories/orders");
-const { runSyncCycle } = await import("@/lib/sync/engine");
+const { runSyncCycle, applyCustomer, applyOrder } = await import("@/lib/sync/engine");
 const { getPendingSyncCount } = await import("@/lib/db/repositories/sync");
+const { db } = await import("@/lib/db/client");
+const { orders: ordersTable, customers: customersTable } = await import("@/db/schema");
+const { eq } = await import("drizzle-orm");
 
 describe("sync engine", () => {
   let customerId: string;
@@ -83,5 +93,68 @@ describe("sync engine", () => {
 
     const second = await runSyncCycle(failingTarget);
     expect(second.processed).toBe(0); // backoff window hasn't elapsed
+  });
+
+  it("pull: applies a brand-new cloud customer that doesn't exist locally", () => {
+    const cloudId = "cus_" + Math.random().toString(36).slice(2);
+    applyCustomer({
+      _id: cloudId,
+      name: "Pulled From Web",
+      updatedAt: new Date().toISOString(),
+      createdAt: new Date().toISOString(),
+    });
+
+    const local = db.select().from(customersTable).where(eq(customersTable.id, cloudId)).get();
+    expect(local?.name).toBe("Pulled From Web");
+    expect(local?.syncStatus).toBe("synced");
+  });
+
+  it("pull: never overwrites a local edit with an older cloud snapshot (conflict rule)", () => {
+    const local = createCustomer({ name: "Locally Renamed" }, null);
+
+    applyCustomer({
+      _id: local.id,
+      name: "Stale Cloud Name",
+      // Older than the local row's updatedAt, which was just set by createCustomer.
+      updatedAt: new Date(Date.now() - 60_000).toISOString(),
+    });
+
+    const after = db.select().from(customersTable).where(eq(customersTable.id, local.id)).get();
+    expect(after?.name).toBe("Locally Renamed");
+  });
+
+  it("pull: disambiguates instead of losing an order whose orderNumber collides locally", () => {
+    const today = new Date().toISOString().slice(0, 10);
+    const { order: localOrder } = createOrder(
+      { orderDate: today, customerId, item: "Bangle", pieces: 1, weightIn: "2.000", weightOut: "1.900", makingCharge: "0.010", touch: "75" },
+      null,
+    );
+
+    const incomingId = "ord_" + Math.random().toString(36).slice(2);
+    applyOrder({
+      _id: incomingId,
+      orderNumber: localOrder.orderNumber, // same human-facing number, different device
+      orderDate: today,
+      customerId,
+      customerNameSnapshot: "Test Customer",
+      item: "Ring",
+      pieces: 1,
+      weightIn: "1.000",
+      weightOut: "0.950",
+      makingCharge: "0.010",
+      loss: "0.050",
+      touch: "75",
+      fineTotal: "0.750",
+      updatedAt: new Date().toISOString(),
+    });
+
+    const pulled = db.select().from(ordersTable).where(eq(ordersTable.id, incomingId)).get();
+    expect(pulled).toBeDefined();
+    expect(pulled?.orderNumber).not.toBe(localOrder.orderNumber);
+    expect(pulled?.orderNumber?.startsWith(localOrder.orderNumber)).toBe(true);
+
+    // The original local order must still exist, untouched, under its own number.
+    const stillThere = db.select().from(ordersTable).where(eq(ordersTable.id, localOrder.id)).get();
+    expect(stillThere?.orderNumber).toBe(localOrder.orderNumber);
   });
 });

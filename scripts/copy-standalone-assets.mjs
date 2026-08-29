@@ -83,3 +83,38 @@ rmSync(stageDir, { recursive: true, force: true });
 mkdirSync(stagedPkgDir, { recursive: true });
 cpSync(standaloneDir, stagedPkgDir, { recursive: true });
 console.log(`[copy-standalone-assets] staged packaging copy at ${path.relative(root, stagedPkgDir)}`);
+
+// SECURITY: electron-builder ships everything under build-stage/pkg inside
+// the installed EXE as a plain, unencrypted extraResources folder (see the
+// "build.extraResources" entry in package.json) - NOT inside the asar, and
+// trivially readable by anyone with the installed app. The loop above
+// (staging .next/standalone) just copied whatever .env/.env.local/
+// .env.production(.local) exists at the repo root - including a real
+// MONGODB_URI Atlas connection string - straight into that shipped folder.
+// That is exactly the credential exposure the brief prohibits ("Do not put
+// MongoDB Atlas credentials inside the desktop application").
+//
+// The web/server deployment (plain `next start`, or an unpackaged
+// `electron:dev` run against .next/standalone directly) is a server the
+// operator controls, so its .env is fine as-is - only the *shipped,
+// end-user-installed* copy needs to not carry it. So: strip whatever env
+// files just got staged, and require an explicit, separate opt-in
+// (.env.desktop) naming exactly what should ship to end users. Without
+// that file, the packaged desktop app runs fully offline (which is always
+// safe and always works) rather than silently leaking a cloud credential.
+for (const envFile of [".env", ".env.local", ".env.production", ".env.production.local"]) {
+  const staged = path.join(stagedPkgDir, envFile);
+  if (existsSync(staged)) rmSync(staged);
+}
+const desktopEnv = path.join(root, ".env.desktop");
+if (existsSync(desktopEnv)) {
+  cpSync(desktopEnv, path.join(stagedPkgDir, ".env"));
+  console.log(
+    "[copy-standalone-assets] copied .env.desktop -> build-stage/pkg/.env (opt-in: this file ships inside the installer)",
+  );
+} else {
+  console.log(
+    "[copy-standalone-assets] no .env.desktop found - packaged desktop app will run fully offline " +
+      "(see .env.example: create .env.desktop with a least-privilege MONGODB_URI to enable cloud sync in the shipped installer)",
+  );
+}
