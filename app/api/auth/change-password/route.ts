@@ -1,16 +1,11 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
-import { eq } from "drizzle-orm";
 
 import { handleApiError, ok } from "@/lib/api/respond";
 import { requireUser } from "@/lib/auth/session";
 import { verifyPassword, validatePasswordStrength } from "@/lib/auth/password";
-import { updateUserPassword } from "@/lib/db/repositories/users";
-import { users } from "@/db/schema";
-import { db } from "@/lib/db/client";
+import { findUserById, updateUserPassword } from "@/lib/db/repositories/users";
 
-// Always dynamic: every route here reads the session cookie and/or hits
-// SQLite directly, so there is nothing safe to prerender or cache.
 export const dynamic = "force-dynamic";
 
 const schema = z.object({
@@ -23,7 +18,7 @@ export async function POST(req: NextRequest) {
     const user = await requireUser();
     const body = schema.parse(await req.json());
 
-    const record = db.select().from(users).where(eq(users.id, user.id)).get();
+    const record = await findUserById(user.id);
     if (!record) return ok({ error: "Account not found." }, 404);
 
     const valid = await verifyPassword(body.currentPassword, record.passwordHash);

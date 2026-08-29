@@ -3,12 +3,10 @@ import path from "node:path";
 
 import extractZip from "extract-zip";
 
-import { USER_DATA_DIR, SAFETY_BACKUP_DIR, tempDir } from "@/lib/paths";
+import { SAFETY_BACKUP_DIR, tempDir } from "@/lib/paths";
 import { createSafetyBackup, type BackupManifest } from "@/lib/backup/backup";
+import { col } from "@/lib/db/mongo";
 import { logger } from "@/lib/logger";
-
-export const PENDING_RESTORE_DB = path.join(USER_DATA_DIR, "pending-restore.sqlite3");
-export const RESTORE_MARKER = path.join(USER_DATA_DIR, "restore-marker.json");
 
 export interface RestoreMarker {
   stagedAt: string;
@@ -17,23 +15,8 @@ export interface RestoreMarker {
 }
 
 /**
- * Stages a restore from a backup zip (section 28).
- *
- * We never swap the live database file out from under the running
- * process - the Next.js server holds a long-lived, WAL-mode connection to
- * it (lib/db/client.ts), and better-sqlite3 has no safe "replace the file
- * this handle points at" operation. Instead we:
- *   1. Validate the zip actually contains a manifest + db file.
- *   2. Take a safety backup of the *current* live database first, so a
- *      bad restore is always recoverable (section 28: "Never overwrite
- *      the current database without creating a recoverable backup
- *      first").
- *   3. Copy the restored db file to a staging path and drop a marker file.
- *   4. Return `{ requiresRestart: true }` - the caller (Settings page)
- *      prompts the user to restart, and electron/main.ts checks for this
- *      marker on startup, performs the actual file swap while nothing has
- *      the database open yet, then deletes the marker and launches
- *      normally. See electron/main.ts `applyPendingRestoreIfAny()`.
+ * Performs a restore from a backup zip immediately into MongoDB.
+ * Takes a safety backup of the current state first.
  */
 export async function stageRestore(zipFilePath: string): Promise<RestoreMarker> {
   const workDir = tempDir("jp-restore-");
@@ -47,23 +30,45 @@ export async function stageRestore(zipFilePath: string): Promise<RestoreMarker> 
     }
     const manifest: BackupManifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
 
-    const dbPath = path.join(workDir, manifest.dbFileName || "jewellery-polishing.sqlite3");
-    if (!fs.existsSync(dbPath)) {
-      throw new Error("This file doesn't look like a valid backup (missing database file).");
-    }
-
+    // Take a safety backup of the current database first
     const safetyBackupPath = await createSafetyBackup(SAFETY_BACKUP_DIR);
 
-    fs.copyFileSync(dbPath, PENDING_RESTORE_DB);
+    // Read the JSON files
+    const usersJson = path.join(workDir, "users.json");
+    const customersJson = path.join(workDir, "customers.json");
+    const ordersJson = path.join(workDir, "orders.json");
+    const settingsJson = path.join(workDir, "settings.json");
+
+    const users = fs.existsSync(usersJson) ? JSON.parse(fs.readFileSync(usersJson, "utf8")) : [];
+    const customers = fs.existsSync(customersJson) ? JSON.parse(fs.readFileSync(customersJson, "utf8")) : [];
+    const orders = fs.existsSync(ordersJson) ? JSON.parse(fs.readFileSync(ordersJson, "utf8")) : [];
+    const settings = fs.existsSync(settingsJson) ? JSON.parse(fs.readFileSync(settingsJson, "utf8")) : [];
+
+    // Restore to MongoDB
+    const usersCol = await col("users");
+    const customersCol = await col("customers");
+    const ordersCol = await col("orders");
+    const settingsCol = await col("settings");
+
+    // Clear existing data
+    await usersCol.deleteMany({});
+    await customersCol.deleteMany({});
+    await ordersCol.deleteMany({});
+    await settingsCol.deleteMany({});
+
+    // Insert restored data
+    if (users.length > 0) await usersCol.insertMany(users);
+    if (customers.length > 0) await customersCol.insertMany(customers);
+    if (orders.length > 0) await ordersCol.insertMany(orders);
+    if (settings.length > 0) await settingsCol.insertMany(settings);
 
     const marker: RestoreMarker = {
       stagedAt: new Date().toISOString(),
       manifest,
       safetyBackupPath,
     };
-    fs.writeFileSync(RESTORE_MARKER, JSON.stringify(marker, null, 2), "utf8");
 
-    logger.info("Restore staged, awaiting restart", { safetyBackupPath });
+    logger.info("Restore complete", { safetyBackupPath });
     return marker;
   } finally {
     fs.rmSync(workDir, { recursive: true, force: true });
@@ -71,5 +76,5 @@ export async function stageRestore(zipFilePath: string): Promise<RestoreMarker> 
 }
 
 export function hasPendingRestore(): boolean {
-  return fs.existsSync(RESTORE_MARKER) && fs.existsSync(PENDING_RESTORE_DB);
+  return false;
 }

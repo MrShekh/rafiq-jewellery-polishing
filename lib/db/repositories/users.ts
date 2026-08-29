@@ -1,79 +1,65 @@
-import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
-
-import { users } from "@/db/schema";
-import { db } from "@/lib/db/client";
+import { col } from "@/lib/db/mongo";
+import { type UserDoc } from "@/lib/db/types";
 import { hashPassword } from "@/lib/auth/password";
-import { recordAudit } from "@/lib/db/repositories/audit";
 import { logger } from "@/lib/logger";
 
-export function findUserByUsername(username: string) {
-  return db.select().from(users).where(eq(users.username, username.toLowerCase().trim())).get();
+export async function findUserByUsername(username: string): Promise<UserDoc | null> {
+  const c = await col<UserDoc>("users");
+  return c.findOne({ username: username.toLowerCase().trim() });
 }
 
-export function hasAnyUser(): boolean {
-  const row = db.select({ id: users.id }).from(users).limit(1).get();
-  return !!row;
+export async function findUserById(id: string): Promise<UserDoc | null> {
+  const c = await col<UserDoc>("users");
+  return c.findOne({ _id: id });
+}
+
+export async function hasAnyUser(): Promise<boolean> {
+  const c = await col<UserDoc>("users");
+  const count = await c.countDocuments();
+  return count > 0;
 }
 
 export async function createAdminUser(input: {
   username: string;
   displayName: string;
   password: string;
-}) {
+}): Promise<UserDoc> {
   const id = nanoid();
   const now = new Date().toISOString();
   const passwordHash = await hashPassword(input.password);
 
-  const values = {
-    id,
+  const doc: UserDoc = {
+    _id: id,
     username: input.username.toLowerCase().trim(),
     displayName: input.displayName,
     passwordHash,
-    role: "admin" as const,
+    role: "admin",
     isActive: true,
     createdAt: now,
     updatedAt: now,
   };
 
-  db.transaction((tx) => {
-    tx.insert(users).values(values).run();
-    recordAudit(tx, {
-      entityType: "user",
-      entityId: id,
-      action: "create",
-      userId: id,
-      message: "Admin account created during first-run setup",
-    });
-  });
-
-  logger.info("Admin user created", { userId: id, username: values.username });
-  return values;
+  const c = await col<UserDoc>("users");
+  await c.insertOne(doc as any);
+  logger.info("Admin user created", { userId: id, username: doc.username });
+  return doc;
 }
 
-export function touchLastLogin(userId: string) {
-  db.update(users)
-    .set({ lastLoginAt: new Date().toISOString() })
-    .where(eq(users.id, userId))
-    .run();
+export async function touchLastLogin(userId: string) {
+  const c = await col<UserDoc>("users");
+  await c.updateOne({ _id: userId }, { $set: { lastLoginAt: new Date().toISOString() } });
 }
 
 export async function updateUserPassword(userId: string, newPassword: string) {
   const passwordHash = await hashPassword(newPassword);
-  db.transaction((tx) => {
-    tx.update(users)
-      .set({ passwordHash, updatedAt: new Date().toISOString() })
-      .where(eq(users.id, userId))
-      .run();
-    recordAudit(tx, { entityType: "user", entityId: userId, action: "change_password", userId });
-  });
+  const c = await col<UserDoc>("users");
+  await c.updateOne({ _id: userId }, { $set: { passwordHash, updatedAt: new Date().toISOString() } });
   logger.info("Password changed", { userId });
 }
 
-export function updateUserProfile(userId: string, updates: { displayName?: string }) {
-  db.update(users)
-    .set({ ...updates, updatedAt: new Date().toISOString() })
-    .where(eq(users.id, userId))
-    .run();
-  return db.select().from(users).where(eq(users.id, userId)).get();
+export async function updateUserProfile(userId: string, updates: { displayName?: string }) {
+  const c = await col<UserDoc>("users");
+  await c.updateOne({ _id: userId }, { $set: { ...updates, updatedAt: new Date().toISOString() } });
+  return findUserById(userId);
 }

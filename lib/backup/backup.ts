@@ -3,7 +3,7 @@ import path from "node:path";
 
 import archiver from "archiver";
 
-import { sqlite } from "@/lib/db/client";
+import { col } from "@/lib/db/mongo";
 import { BACKUP_DIR, tempDir } from "@/lib/paths";
 import { logger } from "@/lib/logger";
 import { APP_VERSION } from "@/lib/version";
@@ -11,31 +11,34 @@ import { APP_VERSION } from "@/lib/version";
 export interface BackupManifest {
   appVersion: string;
   createdAt: string;
-  dbFileName: string;
 }
 
 /**
- * Creates a self-contained backup zip (brief section 27):
- * `JewelleryBackup_2026-08-25.zip` containing a *consistent* snapshot of
- * the SQLite database plus a manifest.
- *
- * We use better-sqlite3's native `.backup()` (SQLite's official online
- * backup API) rather than `fs.copyFile` on the live .sqlite3 file: the
- * live file is in WAL mode and may have uncommitted-to-main-file pages at
- * any instant, so a raw copy risks a torn/corrupt snapshot. `.backup()`
- * produces a proper point-in-time copy even while the app keeps running
- * and writing.
+ * Creates a self-contained backup zip containing a consistent snapshot of
+ * all MongoDB collections.
  */
 export async function createBackupZip(destinationPath: string): Promise<BackupManifest> {
   const workDir = tempDir("jp-backup-");
-  const dbSnapshotPath = path.join(workDir, "jewellery-polishing.sqlite3");
 
-  await sqlite.backup(dbSnapshotPath);
+  // Fetch all data from MongoDB
+  const usersCol = await col("users");
+  const customersCol = await col("customers");
+  const ordersCol = await col("orders");
+  const settingsCol = await col("settings");
+
+  const users = await usersCol.find({}).toArray();
+  const customers = await customersCol.find({}).toArray();
+  const orders = await ordersCol.find({}).toArray();
+  const settings = await settingsCol.find({}).toArray();
+
+  fs.writeFileSync(path.join(workDir, "users.json"), JSON.stringify(users, null, 2), "utf8");
+  fs.writeFileSync(path.join(workDir, "customers.json"), JSON.stringify(customers, null, 2), "utf8");
+  fs.writeFileSync(path.join(workDir, "orders.json"), JSON.stringify(orders, null, 2), "utf8");
+  fs.writeFileSync(path.join(workDir, "settings.json"), JSON.stringify(settings, null, 2), "utf8");
 
   const manifest: BackupManifest = {
     appVersion: APP_VERSION,
     createdAt: new Date().toISOString(),
-    dbFileName: "jewellery-polishing.sqlite3",
   };
   fs.writeFileSync(path.join(workDir, "manifest.json"), JSON.stringify(manifest, null, 2), "utf8");
 
@@ -46,8 +49,7 @@ export async function createBackupZip(destinationPath: string): Promise<BackupMa
   return manifest;
 }
 
-/** Convenience wrapper used before a restore (section 28: "create an
- * automatic safety backup before restoration"). */
+/** Convenience wrapper used before a restore. */
 export async function createSafetyBackup(safetyDir: string): Promise<string> {
   fs.mkdirSync(safetyDir, { recursive: true });
   const fileName = `PreRestoreSafety_${timestampForFilename()}.zip`;

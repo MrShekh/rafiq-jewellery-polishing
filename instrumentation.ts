@@ -1,22 +1,19 @@
 /**
- * Next.js server-startup hook (stable since Next 14, no experimental flag
- * needed - see next.config.mjs). `register()` runs exactly once per server
- * process, right after the server starts and before it accepts requests -
- * for this app that is: once for the hosted "web" deployment (`next start`
- * / `next dev`), and once for the local standalone server.js that
- * electron/main.ts spawns as the desktop app's backend.
+ * Next.js server-startup hook. Runs once per server process, right after
+ * the server starts and before it accepts any requests.
  *
- * This is the fix for section 26 of the brief ("sync automatically... at
- * minimum: on application startup"): lib/sync/engine.ts's
- * startPeriodicSync() was fully implemented but never actually called from
- * anywhere, so background sync only ever ran when a user manually pressed
- * "Sync now" in Settings. Wiring it here means every server process that
- * boots with MONGODB_URI configured starts syncing on its own, with zero
- * per-page/per-route changes.
+ * With the MongoDB-only architecture, this ensures all required indexes
+ * are present in MongoDB Atlas on every startup before any request is served.
  */
 export async function register() {
   if (process.env.NEXT_RUNTIME !== "nodejs") return;
 
-  const { startPeriodicSync } = await import("@/lib/sync/engine");
-  startPeriodicSync();
+  try {
+    const { ensureIndexes } = await import("@/lib/db/mongo");
+    await ensureIndexes();
+  } catch (err) {
+    // Log but don't crash the server — indexes are for performance,
+    // not correctness. The app will work without them (just slower).
+    console.error("[startup] Failed to ensure MongoDB indexes:", err);
+  }
 }

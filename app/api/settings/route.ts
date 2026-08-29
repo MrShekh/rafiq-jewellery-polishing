@@ -12,21 +12,23 @@ import {
   getSetting,
 } from "@/lib/db/repositories/settings";
 import { APP_VERSION } from "@/lib/version";
-import { isCloudSyncConfigured } from "@/lib/sync/mongo";
 
-// Always dynamic: every route here reads the session cookie and/or hits
-// SQLite directly, so there is nothing safe to prerender or cache.
 export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
-    await requireUser();
+    const user = await requireUser();
+    const [business, precision, theme] = await Promise.all([
+      getBusinessProfile(user.id),
+      getPrecisionPolicy(user.id),
+      getSetting(user.id, SETTINGS_KEYS.theme),
+    ]);
     return ok({
-      business: getBusinessProfile(),
-      precision: getPrecisionPolicy(),
-      theme: getSetting(SETTINGS_KEYS.theme) ?? "system",
+      business,
+      precision,
+      theme: theme ?? "system",
       appVersion: APP_VERSION,
-      cloudSyncConfigured: isCloudSyncConfigured(),
+      cloudSyncConfigured: true, // MongoDB IS the database now
     });
   } catch (err) {
     return handleApiError(err);
@@ -53,16 +55,18 @@ const updateSchema = z.object({
 
 export async function PATCH(req: NextRequest) {
   try {
-    await requireUser();
+    const user = await requireUser();
     const body = updateSchema.parse(await req.json());
 
-    if (body.business) setBusinessProfile(body.business);
+    const ops: Promise<void>[] = [];
+    if (body.business) ops.push(setBusinessProfile(user.id, body.business));
     if (body.precision) {
-      if (body.precision.weight !== undefined) setSetting(SETTINGS_KEYS.precisionWeight, String(body.precision.weight));
-      if (body.precision.touch !== undefined) setSetting(SETTINGS_KEYS.precisionTouch, String(body.precision.touch));
-      if (body.precision.fine !== undefined) setSetting(SETTINGS_KEYS.precisionFine, String(body.precision.fine));
+      if (body.precision.weight !== undefined) ops.push(setSetting(user.id, SETTINGS_KEYS.precisionWeight, String(body.precision.weight)));
+      if (body.precision.touch !== undefined) ops.push(setSetting(user.id, SETTINGS_KEYS.precisionTouch, String(body.precision.touch)));
+      if (body.precision.fine !== undefined) ops.push(setSetting(user.id, SETTINGS_KEYS.precisionFine, String(body.precision.fine)));
     }
-    if (body.theme) setSetting(SETTINGS_KEYS.theme, body.theme);
+    if (body.theme) ops.push(setSetting(user.id, SETTINGS_KEYS.theme, body.theme));
+    await Promise.all(ops);
 
     return ok({ success: true });
   } catch (err) {

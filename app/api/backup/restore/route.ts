@@ -7,30 +7,12 @@ import { handleApiError, ok } from "@/lib/api/respond";
 import { requireUser } from "@/lib/auth/session";
 import { stageRestore } from "@/lib/backup/restore";
 import { recordAudit } from "@/lib/db/repositories/audit";
-import { db } from "@/lib/db/client";
 import { tempDir } from "@/lib/paths";
 
-// Always dynamic: every route here reads the session cookie and/or hits
-// SQLite directly, so there is nothing safe to prerender or cache.
 export const dynamic = "force-dynamic";
 
 const schema = z.object({ filePath: z.string().min(1) });
 
-/**
- * Stages a restore (section 28). This never touches the live database in
- * this request - see lib/backup/restore.ts for why a full app restart is
- * required to safely complete it, and electron/main.ts for the startup
- * check that performs the actual swap.
- *
- * Accepts two request shapes:
- *   - JSON `{ filePath }` - the normal desktop flow, where Electron's
- *     native "Open File" dialog (electron/ipc/dialogs.ts) already resolved
- *     an absolute path on the user's own machine.
- *   - `multipart/form-data` with a `file` field - a fallback used only
- *     when the app is running as a plain browser tab with no Electron
- *     bridge (e.g. during `next dev`), so restore stays testable without
- *     the desktop shell.
- */
 export async function POST(req: NextRequest) {
   try {
     const user = await requireUser();
@@ -56,13 +38,11 @@ export async function POST(req: NextRequest) {
 
     const marker = await stageRestore(filePath);
 
-    db.transaction((tx) => {
-      recordAudit(tx, {
-        entityType: "backup",
-        action: "restore_staged",
-        userId: user.id,
-        message: `Staged restore from ${filePath}; safety backup at ${marker.safetyBackupPath}`,
-      });
+    await recordAudit({
+      entityType: "backup",
+      action: "restore_staged",
+      userId: user.id,
+      message: `Staged restore from ${filePath}; safety backup at ${marker.safetyBackupPath}`,
     });
 
     return ok({ requiresRestart: true, marker });

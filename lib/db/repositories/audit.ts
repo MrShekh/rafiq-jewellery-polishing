@@ -1,10 +1,7 @@
 import { nanoid } from "nanoid";
+import { col } from "@/lib/db/mongo";
 
-import { auditLogs } from "@/db/schema";
-import type { Transaction } from "@/lib/db/client";
-
-export function recordAudit(
-  tx: Transaction,
+export async function recordAudit(
   entry: {
     entityType: string;
     entityId?: string | null;
@@ -15,9 +12,10 @@ export function recordAudit(
     message?: string;
   },
 ) {
-  tx.insert(auditLogs)
-    .values({
-      id: nanoid(),
+  try {
+    const c = await col("audit_logs");
+    await c.insertOne({
+      _id: nanoid(),
       entityType: entry.entityType,
       entityId: entry.entityId ?? null,
       action: entry.action,
@@ -25,6 +23,9 @@ export function recordAudit(
       beforeJson: entry.before !== undefined ? JSON.stringify(entry.before) : null,
       afterJson: entry.after !== undefined ? JSON.stringify(entry.after) : null,
       message: entry.message ?? null,
-    })
-    .run();
+      createdAt: new Date().toISOString(),
+    } as any);
+  } catch (err) {
+    console.error("Failed to record audit log:", err);
+  }
 }

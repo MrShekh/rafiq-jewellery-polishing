@@ -1,140 +1,105 @@
-import { and, asc, desc, eq, isNull, like, or } from "drizzle-orm";
 import { nanoid } from "nanoid";
-
-import { customers, orders } from "@/db/schema";
-import { db } from "@/lib/db/client";
+import { col } from "@/lib/db/mongo";
+import { type CustomerDoc, type OrderDoc } from "@/lib/db/types";
 import { calculateOrderTotals } from "@/lib/calculations";
 import { getPrecisionPolicy } from "@/lib/db/repositories/settings";
-import { queueSync } from "@/lib/db/repositories/sync-helpers";
-import { recordAudit } from "@/lib/db/repositories/audit";
-import type { CustomerInput } from "@/lib/validation/customer";
 import { logger } from "@/lib/logger";
-import { NotFoundError, ConflictError } from "@/lib/db/repositories/orders";
+import type { CustomerInput } from "@/lib/validation/customer";
 
-export function listCustomers(options: { search?: string; includeInactive?: boolean } = {}) {
-  const conditions = [isNull(customers.deletedAt)] as ReturnType<typeof eq>[];
-  if (!options.includeInactive) {
-    conditions.push(eq(customers.isActive, true) as unknown as ReturnType<typeof eq>);
-  }
-  if (options.search && options.search.trim()) {
-    const term = `%${options.search.trim()}%`;
-    conditions.push(
-      or(like(customers.name, term), like(customers.phone, term)) as unknown as ReturnType<
-        typeof eq
-      >,
-    );
-  }
+export class NotFoundError extends Error { }
+export class ConflictError extends Error { }
 
-  return db
-    .select()
-    .from(customers)
-    .where(and(...conditions))
-    .orderBy(asc(customers.name))
-    .all();
+export async function listCustomers(
+  userId: string,
+  options: { search?: string; includeInactive?: boolean } = {},
+): Promise<CustomerDoc[]> {
+  const c = await col<CustomerDoc>("customers");
+  const query: Record<string, unknown> = {
+    userId,
+    deletedAt: null,
+  };
+  if (!options.includeInactive) query.isActive = true;
+  if (options.search?.trim()) {
+    const re = new RegExp(options.search.trim(), "i");
+    query.$or = [{ name: re }, { phone: re }];
+  }
+  return c.find(query).sort({ name: 1 }).toArray() as Promise<CustomerDoc[]>;
 }
 
-export function getCustomerById(id: string) {
-  const row = db.select().from(customers).where(eq(customers.id, id)).get();
-  if (!row) throw new NotFoundError(`Customer ${id} not found`);
-  return row;
+export async function getCustomerById(userId: string, id: string): Promise<CustomerDoc> {
+  const c = await col<CustomerDoc>("customers");
+  const doc = await c.findOne({ _id: id, userId });
+  if (!doc) throw new NotFoundError(`Customer ${id} not found`);
+  return doc as CustomerDoc;
 }
 
-export function createCustomer(input: CustomerInput, userId: string | null) {
+export async function createCustomer(
+  userId: string,
+  input: CustomerInput,
+): Promise<CustomerDoc> {
   const id = nanoid();
   const now = new Date().toISOString();
 
-  const values = {
-    id,
+  const doc: CustomerDoc = {
+    _id: id,
+    userId,
     name: input.name,
     phone: input.phone ?? null,
     address: input.address ?? null,
     notes: input.notes ?? null,
     isActive: true,
+    createdBy: userId,
     createdAt: now,
     updatedAt: now,
+    deletedAt: null,
   };
 
-  db.transaction((tx) => {
-    tx.insert(customers).values(values).run();
-    queueSync(tx, "customer", id, "upsert", values);
-    recordAudit(tx, { entityType: "customer", entityId: id, action: "create", userId, after: values });
-  });
-
+  const c = await col<CustomerDoc>("customers");
+  await c.insertOne(doc as any);
   logger.info("Customer created", { customerId: id });
-  return getCustomerById(id);
+  return doc;
 }
 
-export function updateCustomer(
+export async function updateCustomer(
+  userId: string,
   id: string,
   input: Partial<CustomerInput> & { isActive?: boolean },
-  userId: string | null,
-) {
-  const existing = getCustomerById(id);
+): Promise<CustomerDoc> {
+  const existing = await getCustomerById(userId, id);
   const now = new Date().toISOString();
 
-  const values = {
-    name: input.name ?? existing.name,
+  const updates: Partial<CustomerDoc> = {
+    name: input.name !== undefined ? input.name : existing.name,
     phone: input.phone !== undefined ? input.phone : existing.phone,
     address: input.address !== undefined ? input.address : existing.address,
     notes: input.notes !== undefined ? input.notes : existing.notes,
     isActive: input.isActive !== undefined ? input.isActive : existing.isActive,
     updatedAt: now,
-    syncStatus: "pending" as const,
   };
 
-  db.transaction((tx) => {
-    tx.update(customers).set(values).where(eq(customers.id, id)).run();
-    queueSync(tx, "customer", id, "upsert", { id, ...values });
-    recordAudit(tx, {
-      entityType: "customer",
-      entityId: id,
-      action: "update",
-      userId,
-      before: existing,
-      after: values,
-    });
-
-    // Keep the denormalized name snapshot on this customer's historical
-    // orders untouched (that's intentional - see db/schema.ts), but propagate
-    // the *current* name so future exports/lists that join live customers
-    // stay correct without a backfill migration.
-  });
-
+  const c = await col<CustomerDoc>("customers");
+  await c.updateOne({ _id: id, userId }, { $set: updates });
   logger.info("Customer updated", { customerId: id });
-  return getCustomerById(id);
+  return getCustomerById(userId, id);
 }
 
-export function deactivateCustomer(id: string, userId: string | null) {
-  return updateCustomer(id, { isActive: false }, userId);
+export async function deactivateCustomer(userId: string, id: string) {
+  return updateCustomer(userId, id, { isActive: false });
 }
 
-/** Soft delete a customer. Refuses if the customer has any non-deleted orders,
- * since orders require a valid customerId - deactivate instead in that case. */
-export function softDeleteCustomer(id: string, userId: string | null) {
-  const existing = getCustomerById(id);
-  const activeOrders = db
-    .select({ id: orders.id })
-    .from(orders)
-    .where(and(eq(orders.customerId, id), isNull(orders.deletedAt)))
-    .limit(1)
-    .all();
-
-  if (activeOrders.length > 0) {
+export async function softDeleteCustomer(userId: string, id: string) {
+  // Check for active orders
+  const orders = await col<OrderDoc>("orders");
+  const activeOrder = await orders.findOne({ userId, customerId: id, deletedAt: null });
+  if (activeOrder) {
     throw new ConflictError(
       "This customer has existing orders and can't be deleted. Deactivate them instead.",
     );
   }
 
   const now = new Date().toISOString();
-  db.transaction((tx) => {
-    tx.update(customers)
-      .set({ deletedAt: now, isActive: false, updatedAt: now, syncStatus: "pending" })
-      .where(eq(customers.id, id))
-      .run();
-    queueSync(tx, "customer", id, "delete", { id });
-    recordAudit(tx, { entityType: "customer", entityId: id, action: "delete", userId, before: existing });
-  });
-
+  const c = await col<CustomerDoc>("customers");
+  await c.updateOne({ _id: id, userId }, { $set: { deletedAt: now, isActive: false, updatedAt: now } });
   logger.info("Customer soft-deleted", { customerId: id });
 }
 
@@ -149,23 +114,23 @@ export interface CustomerSummary {
   totalWeightOut2: string;
 }
 
-export function getCustomerSummary(customerId: string): CustomerSummary {
-  const rows = db
-    .select({
-      pieces: orders.pieces,
-      weightIn: orders.weightIn,
-      weightOut: orders.weightOut,
-      makingCharge: orders.makingCharge,
-      loss: orders.loss,
-      fineTotal: orders.fineTotal,
-      weightIn2: orders.weightIn2,
-      weightOut2: orders.weightOut2,
-    })
-    .from(orders)
-    .where(and(eq(orders.customerId, customerId), isNull(orders.deletedAt)))
-    .all();
-
-  const totals = calculateOrderTotals(rows, getPrecisionPolicy());
+export async function getCustomerSummary(userId: string, customerId: string): Promise<CustomerSummary> {
+  const c = await col<OrderDoc>("orders");
+  const rows = await c.find({ userId, customerId, deletedAt: null }).toArray();
+  const precision = await getPrecisionPolicy(userId);
+  const totals = calculateOrderTotals(
+    rows.map((r) => ({
+      pieces: r.pieces,
+      weightIn: r.weightIn,
+      weightOut: r.weightOut,
+      makingCharge: r.makingCharge,
+      loss: r.loss,
+      fineTotal: r.fineTotal,
+      weightIn2: r.weightIn2,
+      weightOut2: r.weightOut2,
+    })),
+    precision,
+  );
 
   return {
     totalOrders: rows.length,
@@ -179,11 +144,10 @@ export function getCustomerSummary(customerId: string): CustomerSummary {
   };
 }
 
-export function getCustomerOrderHistory(customerId: string) {
-  return db
-    .select()
-    .from(orders)
-    .where(and(eq(orders.customerId, customerId), isNull(orders.deletedAt)))
-    .orderBy(desc(orders.orderDate), desc(orders.orderNumber))
-    .all();
+export async function getCustomerOrderHistory(userId: string, customerId: string) {
+  const c = await col("orders");
+  return c
+    .find({ userId, customerId, deletedAt: null })
+    .sort({ orderDate: -1, orderNumber: -1 })
+    .toArray();
 }

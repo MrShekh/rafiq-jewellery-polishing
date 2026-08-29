@@ -1,22 +1,19 @@
 import ExcelJS from "exceljs";
 
-import type { Order } from "@/db/schema";
 import type { OrderTotals } from "@/lib/calculations";
 import { getBusinessProfile } from "@/lib/db/repositories/settings";
 
 /**
- * Excel export for the Order Registry (brief section 35). Takes whatever
- * set of orders the caller already filtered (same filter logic the table
- * itself uses - see app/api/orders/export/route.ts) and the matching
- * totals, so the export always matches what's on screen.
+ * Excel export for the Order Registry.
  */
 export async function buildOrderRegistryWorkbook(
-  ordersList: Order[],
+  userId: string,
+  ordersList: any[],
   totals: OrderTotals,
   meta: { dateRangeLabel?: string; customerLabel?: string } = {},
 ): Promise<ExcelJS.Buffer> {
   const workbook = new ExcelJS.Workbook();
-  const business = getBusinessProfile();
+  const business = await getBusinessProfile(userId);
   workbook.creator = business.name || "Jewellery Polishing";
   workbook.created = new Date();
 

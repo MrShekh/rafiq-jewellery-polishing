@@ -1,42 +1,38 @@
 import crypto from "node:crypto";
-
 import { cookies } from "next/headers";
-
-import { db } from "@/lib/db/client";
-import { settings, users } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { getDb } from "@/lib/db/mongo";
 import { logger } from "@/lib/logger";
 
 /**
- * Session handling for a single-machine desktop app.
+ * Cookie-based session auth backed by MongoDB.
  *
- * There is no external auth provider and no network involved: the Next.js
- * server this code runs in is bound to 127.0.0.1 only (see electron/main.ts)
- * and is never reachable from outside the user's own machine. We still
- * treat it like a real auth boundary though (bcrypt-hashed passwords,
- * signed + expiring session tokens in an httpOnly cookie) because "runs
- * locally" is not the same thing as "cannot be attacked" - the packaged
- * app should behave safely even if the user's machine is shared or
- * compromised.
- *
- * The signing secret is generated once (crypto.randomBytes) on first run
- * and stored in the `settings` table; it never leaves this process and is
- * never hard-coded (section 31: never hard-code secrets).
+ * The HMAC signing secret is generated once and stored in MongoDB.
+ * Sessions are signed and verified entirely in-process; no external
+ * session store is required.
  */
 
 const SESSION_COOKIE = "jp_session";
-const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 14; // 14 days ("remember session")
-const SECRET_SETTING_KEY = "auth.session_secret";
+const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 14; // 14 days
+const SECRET_KEY = "auth.session_secret";
+const SECRET_COLLECTION = "app_config";
 
-function getOrCreateSecret(): string {
-  const row = db.select().from(settings).where(eq(settings.key, SECRET_SETTING_KEY)).get();
-  if (row) return row.value;
+// Cache secret in memory for the lifetime of the process
+let _cachedSecret: string | null = null;
+
+async function getOrCreateSecret(): Promise<string> {
+  if (_cachedSecret) return _cachedSecret;
+
+  const db = await getDb();
+  const c = db.collection<{ _id: string; value: string }>(SECRET_COLLECTION);
+  const existing = await c.findOne({ _id: SECRET_KEY });
+  if (existing) {
+    _cachedSecret = existing.value;
+    return _cachedSecret;
+  }
 
   const secret = crypto.randomBytes(48).toString("hex");
-  db.insert(settings)
-    .values({ key: SECRET_SETTING_KEY, value: secret })
-    .onConflictDoNothing()
-    .run();
+  await c.insertOne({ _id: SECRET_KEY, value: secret });
+  _cachedSecret = secret;
   return secret;
 }
 
@@ -46,15 +42,15 @@ interface SessionPayload {
   expiresAt: number;
 }
 
-function sign(payload: SessionPayload): string {
-  const secret = getOrCreateSecret();
+async function sign(payload: SessionPayload): Promise<string> {
+  const secret = await getOrCreateSecret();
   const body = Buffer.from(JSON.stringify(payload)).toString("base64url");
   const mac = crypto.createHmac("sha256", secret).update(body).digest("base64url");
   return `${body}.${mac}`;
 }
 
-function verify(token: string): SessionPayload | null {
-  const secret = getOrCreateSecret();
+async function verify(token: string): Promise<SessionPayload | null> {
+  const secret = await getOrCreateSecret();
   const [body, mac] = token.split(".");
   if (!body || !mac) return null;
 
@@ -76,13 +72,13 @@ function verify(token: string): SessionPayload | null {
 
 export async function createSession(userId: string) {
   const now = Date.now();
-  const token = sign({ userId, issuedAt: now, expiresAt: now + SESSION_TTL_MS });
+  const token = await sign({ userId, issuedAt: now, expiresAt: now + SESSION_TTL_MS });
 
   const store = await cookies();
   store.set(SESSION_COOKIE, token, {
     httpOnly: true,
     sameSite: "lax",
-    secure: false, // local-only HTTP server (127.0.0.1); see electron/main.ts
+    secure: false,
     maxAge: SESSION_TTL_MS / 1000,
     path: "/",
   });
@@ -105,14 +101,15 @@ export async function getCurrentUser(): Promise<CurrentUser | null> {
   const token = store.get(SESSION_COOKIE)?.value;
   if (!token) return null;
 
-  const payload = verify(token);
+  const payload = await verify(token);
   if (!payload) return null;
 
-  const user = db.select().from(users).where(eq(users.id, payload.userId)).get();
+  const { findUserById } = await import("@/lib/db/repositories/users");
+  const user = await findUserById(payload.userId);
   if (!user || !user.isActive) return null;
 
   return {
-    id: user.id,
+    id: user._id,
     username: user.username,
     displayName: user.displayName,
     role: user.role,
@@ -128,4 +125,4 @@ export async function requireUser(): Promise<CurrentUser> {
   return user;
 }
 
-export class AuthError extends Error {}
+export class AuthError extends Error { }

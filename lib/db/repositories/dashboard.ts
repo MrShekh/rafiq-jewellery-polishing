@@ -1,70 +1,54 @@
-import { and, desc, gte, isNull, lte } from "drizzle-orm";
-
-import { orders } from "@/db/schema";
-import { db } from "@/lib/db/client";
+import { col } from "@/lib/db/mongo";
+import { type OrderDoc } from "@/lib/db/types";
 import { calculateOrderTotals, type OrderTotals } from "@/lib/calculations";
 import { getPrecisionPolicy } from "@/lib/db/repositories/settings";
 
-function todayRangeIso(): { start: string; end: string } {
+function todayRangeIso() {
   const now = new Date();
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, "0");
-  const day = String(now.getDate()).padStart(2, "0");
-  const localDateStr = `${year}-${month}-${day}`;
-  return { start: localDateStr, end: localDateStr };
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, "0");
+  const d = String(now.getDate()).padStart(2, "0");
+  const s = `${y}-${m}-${d}`;
+  return { start: s, end: s };
 }
 
-function monthRangeIso(): { start: string; end: string } {
+function monthRangeIso() {
   const now = new Date();
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, "0");
-
-  const start = "01";
-  const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
-  const end = String(lastDay).padStart(2, "0");
-
-  return {
-    start: `${year}-${month}-${start}`,
-    end: `${year}-${month}-${end}`,
-  };
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, "0");
+  const lastDay = new Date(y, now.getMonth() + 1, 0).getDate();
+  return { start: `${y}-${m}-01`, end: `${y}-${m}-${String(lastDay).padStart(2, "0")}` };
 }
 
-function summarizeRange(startDate: string, endDate: string): OrderTotals & { orderCount: number } {
-  const rows = db
-    .select({
-      pieces: orders.pieces,
-      weightIn: orders.weightIn,
-      weightOut: orders.weightOut,
-      makingCharge: orders.makingCharge,
-      loss: orders.loss,
-      fineTotal: orders.fineTotal,
-      weightIn2: orders.weightIn2,
-      weightOut2: orders.weightOut2,
-    })
-    .from(orders)
-    .where(and(gte(orders.orderDate, startDate), lte(orders.orderDate, endDate), isNull(orders.deletedAt)))
-    .all();
+async function summarizeRange(
+  userId: string,
+  startDate: string,
+  endDate: string,
+): Promise<OrderTotals & { orderCount: number }> {
+  const c = await col<OrderDoc>("orders");
+  const rows = await c
+    .find(
+      { userId, deletedAt: null, orderDate: { $gte: startDate, $lte: endDate } },
+      { projection: { pieces: 1, weightIn: 1, weightOut: 1, makingCharge: 1, loss: 1, fineTotal: 1, weightIn2: 1, weightOut2: 1 } },
+    )
+    .toArray();
 
-  const totals = calculateOrderTotals(rows, getPrecisionPolicy());
+  const precision = await getPrecisionPolicy(userId);
+  const totals = calculateOrderTotals(rows as any[], precision);
   return { ...totals, orderCount: rows.length };
 }
 
-export function getTodaySummary() {
+export async function getTodaySummary(userId: string) {
   const { start, end } = todayRangeIso();
-  return summarizeRange(start, end);
+  return summarizeRange(userId, start, end);
 }
 
-export function getMonthlySummary() {
+export async function getMonthlySummary(userId: string) {
   const { start, end } = monthRangeIso();
-  return summarizeRange(start, end);
+  return summarizeRange(userId, start, end);
 }
 
-export function getRecentOrders(limit = 10) {
-  return db
-    .select()
-    .from(orders)
-    .where(isNull(orders.deletedAt))
-    .orderBy(desc(orders.createdAt))
-    .limit(limit)
-    .all();
+export async function getRecentOrders(userId: string, limit = 10): Promise<OrderDoc[]> {
+  const c = await col<OrderDoc>("orders");
+  return c.find({ userId, deletedAt: null }).sort({ createdAt: -1 }).limit(limit).toArray() as Promise<OrderDoc[]>;
 }
