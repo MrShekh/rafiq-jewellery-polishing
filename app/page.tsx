@@ -4,18 +4,21 @@ import { getCurrentUser } from "@/lib/auth/session";
 import { hasAnyUser } from "@/lib/db/repositories/users";
 import { isFirstRunComplete } from "@/lib/db/repositories/settings";
 
-// This page reads from the SQLite DB at runtime — never statically pre-render.
 export const dynamic = "force-dynamic";
 
 /**
- * App launch routing (section 4/42):
+ * App launch routing:
  *   no admin account yet -> first-run wizard
  *   not logged in -> login
- *   logged in -> Order Registry (never Dashboard - section 4 is explicit
- *   that Order Registry, not Dashboard, is the default landing screen).
+ *   logged in -> Order Registry
  */
 export default async function RootPage() {
-  if (!isFirstRunComplete() || !hasAnyUser()) {
+  const [firstRun, hasUser] = await Promise.all([
+    isFirstRunComplete(),
+    hasAnyUser(),
+  ]);
+
+  if (!firstRun || !hasUser) {
     redirect("/first-run");
   }
 
