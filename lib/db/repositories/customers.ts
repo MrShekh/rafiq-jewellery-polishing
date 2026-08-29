@@ -1,5 +1,5 @@
 import { nanoid } from "nanoid";
-import { col } from "@/lib/db/mongo";
+import { col, mapDoc, mapDocs } from "@/lib/db/mongo";
 import { type CustomerDoc, type OrderDoc } from "@/lib/db/types";
 import { calculateOrderTotals } from "@/lib/calculations";
 import { getPrecisionPolicy } from "@/lib/db/repositories/settings";
@@ -12,7 +12,7 @@ export class ConflictError extends Error { }
 export async function listCustomers(
   userId: string,
   options: { search?: string; includeInactive?: boolean } = {},
-): Promise<CustomerDoc[]> {
+): Promise<any[]> {
   const c = await col<CustomerDoc>("customers");
   const query: Record<string, unknown> = {
     userId,
@@ -23,20 +23,21 @@ export async function listCustomers(
     const re = new RegExp(options.search.trim(), "i");
     query.$or = [{ name: re }, { phone: re }];
   }
-  return c.find(query).sort({ name: 1 }).toArray() as Promise<CustomerDoc[]>;
+  const docs = await c.find(query).sort({ name: 1 }).toArray();
+  return mapDocs(docs);
 }
 
-export async function getCustomerById(userId: string, id: string): Promise<CustomerDoc> {
+export async function getCustomerById(userId: string, id: string): Promise<any> {
   const c = await col<CustomerDoc>("customers");
   const doc = await c.findOne({ _id: id, userId });
   if (!doc) throw new NotFoundError(`Customer ${id} not found`);
-  return doc as CustomerDoc;
+  return mapDoc(doc);
 }
 
 export async function createCustomer(
   userId: string,
   input: CustomerInput,
-): Promise<CustomerDoc> {
+): Promise<any> {
   const id = nanoid();
   const now = new Date().toISOString();
 
@@ -57,14 +58,14 @@ export async function createCustomer(
   const c = await col<CustomerDoc>("customers");
   await c.insertOne(doc as any);
   logger.info("Customer created", { customerId: id });
-  return doc;
+  return mapDoc(doc);
 }
 
 export async function updateCustomer(
   userId: string,
   id: string,
   input: Partial<CustomerInput> & { isActive?: boolean },
-): Promise<CustomerDoc> {
+): Promise<any> {
   const existing = await getCustomerById(userId, id);
   const now = new Date().toISOString();
 
@@ -144,10 +145,11 @@ export async function getCustomerSummary(userId: string, customerId: string): Pr
   };
 }
 
-export async function getCustomerOrderHistory(userId: string, customerId: string) {
-  const c = await col("orders");
-  return c
+export async function getCustomerOrderHistory(userId: string, customerId: string): Promise<any[]> {
+  const c = await col<OrderDoc>("orders");
+  const docs = await c
     .find({ userId, customerId, deletedAt: null })
     .sort({ orderDate: -1, orderNumber: -1 })
     .toArray();
+  return mapDocs(docs);
 }

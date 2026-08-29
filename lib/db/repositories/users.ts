@@ -1,17 +1,19 @@
 import { nanoid } from "nanoid";
-import { col } from "@/lib/db/mongo";
+import { col, mapDoc } from "@/lib/db/mongo";
 import { type UserDoc } from "@/lib/db/types";
 import { hashPassword } from "@/lib/auth/password";
 import { logger } from "@/lib/logger";
 
-export async function findUserByUsername(username: string): Promise<UserDoc | null> {
+export async function findUserByUsername(username: string): Promise<any | null> {
   const c = await col<UserDoc>("users");
-  return c.findOne({ username: username.toLowerCase().trim() });
+  const doc = await c.findOne({ username: username.toLowerCase().trim() });
+  return doc ? mapDoc(doc) : null;
 }
 
-export async function findUserById(id: string): Promise<UserDoc | null> {
+export async function findUserById(id: string): Promise<any | null> {
   const c = await col<UserDoc>("users");
-  return c.findOne({ _id: id });
+  const doc = await c.findOne({ _id: id });
+  return doc ? mapDoc(doc) : null;
 }
 
 export async function hasAnyUser(): Promise<boolean> {

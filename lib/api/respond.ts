@@ -23,6 +23,7 @@ export function handleApiError(err: unknown): NextResponse {
     return NextResponse.json({ error: err.message }, { status: 409 });
   }
   if (err instanceof ZodError) {
+    logger.warn("Zod validation failed", { errors: err.flatten().fieldErrors });
     return NextResponse.json(
       {
         error: "Please check the highlighted fields and try again.",

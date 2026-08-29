@@ -1,5 +1,5 @@
 import { nanoid } from "nanoid";
-import { col } from "@/lib/db/mongo";
+import { col, mapDoc, mapDocs } from "@/lib/db/mongo";
 import { type OrderDoc, type CustomerDoc } from "@/lib/db/types";
 import { calculateOrder, calculateOrderTotals, type OrderTotals } from "@/lib/calculations";
 import { datePrefixForOrderNumber, formatOrderNumber } from "@/lib/ids/orderId";
@@ -28,7 +28,7 @@ async function generateOrderNumber(userId: string, orderDate: string): Promise<s
 }
 
 export interface OrderListResult {
-  rows: OrderDoc[];
+  rows: any[];
   total: number;
   totals: OrderTotals;
 }
@@ -70,7 +70,7 @@ export async function listOrders(userId: string, filter: OrderFilter): Promise<O
     .sort({ [sortField]: sortDir, orderNumber: -1 })
     .skip((filter.page - 1) * filter.pageSize)
     .limit(filter.pageSize)
-    .toArray() as OrderDoc[];
+    .toArray();
 
   // Totals across the full filtered set (not just the page)
   const allRows = await c
@@ -82,18 +82,18 @@ export async function listOrders(userId: string, filter: OrderFilter): Promise<O
   const precision = await getPrecisionPolicy(userId);
   const totals = calculateOrderTotals(allRows as any[], precision);
 
-  return { rows, total, totals };
+  return { rows: mapDocs(rows), total, totals };
 }
 
-export async function getOrderById(userId: string, id: string): Promise<OrderDoc> {
+export async function getOrderById(userId: string, id: string): Promise<any> {
   const c = await col<OrderDoc>("orders");
   const doc = await c.findOne({ _id: id, userId });
   if (!doc) throw new NotFoundError(`Order ${id} not found`);
-  return doc as OrderDoc;
+  return mapDoc(doc);
 }
 
 export interface OrderMutationResult {
-  order: OrderDoc;
+  order: any;
   warnings: string[];
 }
 
@@ -159,7 +159,7 @@ export async function createOrder(
   const c = await col<OrderDoc>("orders");
   await c.insertOne(doc as any);
   logger.info("Order created", { orderId: id, orderNumber });
-  return { order: doc, warnings };
+  return { order: mapDoc(doc), warnings };
 }
 
 export async function updateOrder(

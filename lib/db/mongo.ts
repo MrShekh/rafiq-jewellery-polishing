@@ -92,3 +92,15 @@ export async function ensureIndexes() {
 
     logger.info("MongoDB indexes ensured");
 }
+
+export function mapDoc<T extends { _id: string }>(doc: T): T & { id: string } {
+    return {
+        ...doc,
+        id: doc._id,
+    };
+}
+
+export function mapDocs<T extends { _id: string }>(docs: T[]): (T & { id: string })[] {
+    return docs.map(mapDoc);
+}
+
