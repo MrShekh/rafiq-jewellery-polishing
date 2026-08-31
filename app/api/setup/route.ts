@@ -2,7 +2,7 @@ import { NextRequest } from "next/server";
 import { z } from "zod";
 
 import { handleApiError, ok } from "@/lib/api/respond";
-import { hasAnyUser, createAdminUser } from "@/lib/db/repositories/users";
+import { createAdminUser } from "@/lib/db/repositories/users";
 import { setBusinessProfile } from "@/lib/db/repositories/settings";
 import { createSession } from "@/lib/auth/session";
 import { validatePasswordStrength } from "@/lib/auth/password";
@@ -19,18 +19,17 @@ const setupSchema = z.object({
 });
 
 export async function GET() {
-  const firstRunComplete = await hasAnyUser();
-  return ok({ firstRunComplete });
+  return ok({ firstRunComplete: true });
 }
 
-/** First-launch wizard: Welcome → Business Profile → Admin Account → Ready.
- *  Refuses if ANY user already exists in MongoDB (setup already done). */
+/**
+ * Sign up: create a new user account with their own business profile.
+ * Multiple independent clients can each create their own account.
+ * All data (orders, customers) is scoped by userId so each account
+ * only ever sees their own data.
+ */
 export async function POST(req: NextRequest) {
   try {
-    if (await hasAnyUser()) {
-      return ok({ error: "Setup has already been completed." }, 409);
-    }
-
     const body = setupSchema.parse(await req.json());
 
     const passwordIssue = validatePasswordStrength(body.adminPassword);
@@ -52,8 +51,9 @@ export async function POST(req: NextRequest) {
 
     await createSession(admin._id);
 
-    return ok({ success: true });
+    return ok({ success: true, linkedExistingBusiness: false });
   } catch (err) {
     return handleApiError(err);
   }
 }
+

@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Gem, ArrowRight, ArrowLeft, CheckCircle2 } from "lucide-react";
 import { toast } from "sonner";
@@ -69,14 +70,20 @@ export default function FirstRunPage() {
 
           {step === "welcome" && (
             <div className="space-y-4">
-              <h1 className="text-xl font-semibold">Welcome</h1>
+              <h1 className="text-xl font-semibold">Create your account</h1>
               <p className="text-sm text-muted-foreground">
-                Let&apos;s get your workshop set up. This takes less than a minute -
+                Let&apos;s get your workshop set up. This takes less than a minute —
                 just your business name and an admin login.
               </p>
               <Button className="w-full" onClick={() => setStep("business")}>
                 Get started <ArrowRight />
               </Button>
+              <p className="text-center text-sm text-muted-foreground">
+                Already have an account?{" "}
+                <Link href="/login" className="font-medium text-primary hover:underline">
+                  Sign in
+                </Link>
+              </p>
             </div>
           )}
 

@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Gem } from "lucide-react";
 import { toast } from "sonner";
@@ -25,11 +26,6 @@ export default function LoginPage() {
     try {
       await api.post("/api/auth/login", { username, password });
       refresh();
-      // Fire-and-forget: pulls in anything created elsewhere (e.g. the web
-      // app) since this device's last sync, without making the user wait
-      // for it. The periodic background sync (instrumentation.ts) and the
-      // reconnect listener (components/providers/sync-trigger.tsx) cover
-      // everything after this first login.
       api.post("/api/sync/run").catch(() => {});
       router.push("/orders");
     } catch (err) {
@@ -73,6 +69,12 @@ export default function LoginPage() {
               {submitting ? "Signing in..." : "Sign in"}
             </Button>
           </form>
+          <p className="mt-4 text-center text-sm text-muted-foreground">
+            Don&apos;t have an account?{" "}
+            <Link href="/first-run" className="font-medium text-primary hover:underline">
+              Sign up
+            </Link>
+          </p>
         </CardContent>
       </Card>
     </div>
