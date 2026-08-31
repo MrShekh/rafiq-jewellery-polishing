@@ -10,8 +10,9 @@
   },
   "scripts": {
     "dev": "cross-env ELECTRON_RUN_AS_NODE=1 electron node_modules/next/dist/bin/next dev",
-    "build": "next build",
+    "build": "cross-env BUILD_TARGET=electron next build",
     "postbuild": "node scripts/copy-standalone-assets.mjs",
+    "build:vercel": "next build",
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
@@ -23,7 +24,8 @@
     "build:electron": "tsc -p electron/tsconfig.json",
     "electron:dev": "npm run build:electron && concurrently -k \"next dev\" \"wait-on http://localhost:3000 && cross-env ELECTRON_DEV_SERVER_URL=http://localhost:3000 electron .\"",
     "electron:pack": "electron-rebuild -f -w better-sqlite3 && npm run build && npm run build:electron && electron-builder --win --publish always",
-    "electron:pack:dir": "electron-rebuild -f -w better-sqlite3 && npm run build && npm run build:electron && electron-builder --win --dir --publish always"
+    "electron:pack:dir": "electron-rebuild -f -w better-sqlite3 && npm run build && npm run build:electron && electron-builder --win --dir --publish always",
+    "electron:pack-remote": "npm run build:electron && electron-builder --win --publish always --config.extraMetadata.remoteAppUrl=$REMOTE_APP_URL"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.9.1",

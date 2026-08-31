@@ -160,33 +160,62 @@ async function startServer(userDataDir: string): Promise<string> {
  * In `npm run electron:dev`, ELECTRON_DEV_SERVER_URL points at an
  * already-running `next dev` server instead of spawning the standalone
  * build - faster iteration, same renderer code path.
+ *
+ * In production Vercel builds, REMOTE_APP_URL is baked into package.json
+ * via electron-builder extraMetadata (see electron:pack-remote in package.json).
+ * When set, Electron skips spawning a local server entirely and just opens
+ * the hosted URL. This removes the direct MongoDB Atlas dependency from the
+ * client's machine — all DB calls go through the Vercel server over HTTPS (443).
  */
 async function resolveBaseUrl(userDataDir: string): Promise<string> {
+  // 1. Dev mode: use the already-running next dev server
   const devServerUrl = process.env.ELECTRON_DEV_SERVER_URL;
   if (devServerUrl) {
     const url = new URL(devServerUrl);
     await waitForServer(Number(url.port || 80));
     return devServerUrl;
   }
+
+  // 2. Remote (Vercel) mode: URL baked into package.json at build time
+  //    OR passed via env var for manual testing
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const pkg = require("../package.json") as { remoteAppUrl?: string };
+    if (pkg.remoteAppUrl) {
+      console.log(`[main] Remote mode: loading ${pkg.remoteAppUrl}`);
+      return pkg.remoteAppUrl;
+    }
+  } catch {
+    // package.json not readable — fall through to local server
+  }
+  const remoteUrlEnv = process.env.REMOTE_APP_URL;
+  if (remoteUrlEnv) {
+    console.log(`[main] Remote mode (env): loading ${remoteUrlEnv}`);
+    return remoteUrlEnv;
+  }
+
+  // 3. Local server mode (default desktop build)
   return startServer(userDataDir);
 }
 
-/** CSP restricted to the local server this app talks to - section 30:
- * "CSP where practical". The app never loads remote content, so this can
- * be tight without breaking anything. */
-function applyContentSecurityPolicy() {
+/** CSP: allow local server in desktop mode, or HTTPS in remote/Vercel mode. */
+function applyContentSecurityPolicy(appUrl: string) {
+  const isRemote = appUrl.startsWith("https://");
+  const localSources = "http://127.0.0.1:* http://localhost:*";
+  const sources = isRemote ? `${localSources} https:` : localSources;
+
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
     callback({
       responseHeaders: {
         ...details.responseHeaders,
         "Content-Security-Policy": [
-          "default-src 'self' http://127.0.0.1:* http://localhost:*; " +
-            "script-src 'self' 'unsafe-inline' http://127.0.0.1:* http://localhost:*; " +
-            "style-src 'self' 'unsafe-inline' http://127.0.0.1:* http://localhost:*; " +
-            "img-src 'self' data: http://127.0.0.1:* http://localhost:*; " +
-            "font-src 'self' data: http://127.0.0.1:* http://localhost:*; " +
-            "connect-src 'self' http://127.0.0.1:* http://localhost:*; " +
-            "object-src 'none'; base-uri 'self'; frame-ancestors 'none';",
+          `default-src 'self' ${sources}; ` +
+          `script-src 'self' 'unsafe-inline' ${sources}; ` +
+          `style-src 'self' 'unsafe-inline' ${sources}; ` +
+          `img-src 'self' data: ${sources}; ` +
+          `font-src 'self' data: ${sources}; ` +
+          `connect-src 'self' ${sources}; ` +
+          `object-src 'none'; base-uri 'self'; frame-ancestors 'none';`,
         ],
       },
     });
@@ -240,12 +269,12 @@ app.whenReady().then(async () => {
   fs.mkdirSync(userDataDir, { recursive: true });
 
   applyPendingRestoreIfAny(userDataDir);
-  applyContentSecurityPolicy();
   registerIpcHandlers();
   setupAutoUpdater(() => mainWindow);
 
   try {
     baseUrl = await resolveBaseUrl(userDataDir);
+    applyContentSecurityPolicy(baseUrl);
     createWindow(baseUrl);
   } catch (err) {
     console.error("[main] Fatal startup error:", err);
