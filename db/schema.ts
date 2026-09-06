@@ -94,6 +94,16 @@ export const orders = sqliteTable("orders", {
 
   weightIn2: text("weight_in_2"),
   weightOut2: text("weight_out_2"),
+  pieces2: integer("pieces_2"),
+
+  // Fine settlement (section: order clearing). clearedAmount is how much of
+  // fineTotal has been paid back/settled so far; clearStatus is derived from
+  // comparing clearedAmount to fineTotal and stored for fast filtering.
+  clearedAmount: text("cleared_amount").notNull().default("0.000"),
+  clearStatus: text("clear_status", { enum: ["open", "partial", "cleared"] })
+    .notNull()
+    .default("open"),
+  clearedAt: text("cleared_at"),
 
   // Set true when the user explicitly confirmed a Weight Out > Weight In
   // entry (section 10) so the row doesn't keep re-triggering the warning.

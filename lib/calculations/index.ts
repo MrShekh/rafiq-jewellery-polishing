@@ -170,6 +170,9 @@ export interface OrderLike {
   fineTotal: DecimalInput;
   weightIn2?: DecimalInput | null;
   weightOut2?: DecimalInput | null;
+  pieces2?: number | null;
+  /** How much of fineTotal has already been settled/cleared. Defaults to 0 for orders created before clearing existed. */
+  clearedAmount?: DecimalInput | null;
 }
 
 export interface OrderTotals {
@@ -178,9 +181,23 @@ export interface OrderTotals {
   totalWeightOut: string;
   totalMakingCharge: string;
   totalLoss: string;
+  /** Sum of each order's *outstanding* fine (fineTotal - clearedAmount), not the raw historical total. */
   totalFineTotal: string;
   totalWeightIn2: string;
   totalWeightOut2: string;
+  totalPieces2: number;
+  /** Sum of clearedAmount across orders - how much fine has already been settled/returned to customers. Shown alongside totalFineTotal so a shrinking "Fine Total" isn't the only signal. */
+  totalCleared: string;
+}
+
+/** Fine still owed on one order: fineTotal minus whatever has already been cleared, floored at zero. */
+export function outstandingFine(
+  fineTotal: DecimalInput,
+  clearedAmount: DecimalInput | null | undefined,
+  precision: PrecisionPolicy = DEFAULT_PRECISION,
+): Decimal {
+  const remaining = toDecimal(fineTotal).minus(toDecimal(clearedAmount ?? 0));
+  return round(remaining.isNegative() ? new Decimal(0) : remaining, precision.fine);
 }
 
 /** Sums a page/filtered-set of orders for the sticky totals row (section 11) and dashboard summaries. */
@@ -196,6 +213,8 @@ export function calculateOrderTotals(
   let totalFineTotal = new Decimal(0);
   let totalWeightIn2 = new Decimal(0);
   let totalWeightOut2 = new Decimal(0);
+  let totalPieces2 = 0;
+  let totalCleared = new Decimal(0);
 
   for (const order of ordersList) {
     totalPieces += order.pieces;
@@ -203,12 +222,16 @@ export function calculateOrderTotals(
     totalWeightOut = totalWeightOut.plus(toDecimal(order.weightOut));
     totalMakingCharge = totalMakingCharge.plus(toDecimal(order.makingCharge));
     totalLoss = totalLoss.plus(toDecimal(order.loss));
-    totalFineTotal = totalFineTotal.plus(toDecimal(order.fineTotal));
+    totalFineTotal = totalFineTotal.plus(outstandingFine(order.fineTotal, order.clearedAmount, precision));
+    totalCleared = totalCleared.plus(toDecimal(order.clearedAmount ?? 0));
     if (order.weightIn2 != null && order.weightIn2 !== "") {
       totalWeightIn2 = totalWeightIn2.plus(toDecimal(order.weightIn2));
     }
     if (order.weightOut2 != null && order.weightOut2 !== "") {
       totalWeightOut2 = totalWeightOut2.plus(toDecimal(order.weightOut2));
+    }
+    if (order.pieces2 != null) {
+      totalPieces2 += order.pieces2;
     }
   }
 
@@ -221,6 +244,78 @@ export function calculateOrderTotals(
     totalFineTotal: round(totalFineTotal, precision.fine).toFixed(precision.fine),
     totalWeightIn2: round(totalWeightIn2, precision.weight).toFixed(precision.weight),
     totalWeightOut2: round(totalWeightOut2, precision.weight).toFixed(precision.weight),
+    totalPieces2,
+    totalCleared: round(totalCleared, precision.fine).toFixed(precision.fine),
+  };
+}
+
+export type ClearStatus = "open" | "partial" | "cleared";
+
+/** Derives open/partial/cleared purely from the numbers, so it's always consistent with clearedAmount. */
+export function computeClearStatus(
+  fineTotal: DecimalInput,
+  clearedAmount: DecimalInput,
+  precision: PrecisionPolicy = DEFAULT_PRECISION,
+): ClearStatus {
+  const fine = round(toDecimal(fineTotal), precision.fine);
+  const cleared = round(toDecimal(clearedAmount), precision.fine);
+  if (cleared.lte(0)) return "open";
+  if (cleared.gte(fine)) return "cleared";
+  return "partial";
+}
+
+/** If an order's weights/touch are edited after it was partially/fully cleared, clearedAmount can't exceed the new fineTotal. */
+export function reconcileClearAfterEdit(
+  fineTotal: DecimalInput,
+  clearedAmount: DecimalInput,
+  precision: PrecisionPolicy = DEFAULT_PRECISION,
+): { clearedAmount: string; status: ClearStatus } {
+  const fine = toDecimal(fineTotal);
+  let cleared = toDecimal(clearedAmount);
+  if (cleared.gt(fine)) cleared = fine;
+  cleared = round(cleared, precision.fine);
+  return { clearedAmount: cleared.toFixed(precision.fine), status: computeClearStatus(fine, cleared, precision) };
+}
+
+export interface ClearResult {
+  clearedAmount: string;
+  status: ClearStatus;
+  remaining: string;
+}
+
+/**
+ * Applies a full or partial fine-clear. Throws a plain Error (repository
+ * layer maps it to a 409) for a zero/negative amount or an amount that
+ * would overpay the order, so the client/customer numbers never desync.
+ */
+export function applyFineClear(
+  fineTotal: DecimalInput,
+  alreadyCleared: DecimalInput,
+  amount: "full" | DecimalInput,
+  precision: PrecisionPolicy = DEFAULT_PRECISION,
+): ClearResult {
+  const fine = toDecimal(fineTotal);
+  const cleared = toDecimal(alreadyCleared);
+  const remainingBefore = fine.minus(cleared);
+  const toApply = amount === "full" ? remainingBefore : toDecimal(amount);
+
+  const tolerance = new Decimal(1).dividedBy(new Decimal(10).pow(precision.fine));
+  if (toApply.lte(0)) {
+    throw new Error("Clear amount must be greater than zero.");
+  }
+  if (toApply.gt(remainingBefore.plus(tolerance))) {
+    throw new Error("Clear amount exceeds the remaining due amount.");
+  }
+
+  let newCleared = cleared.plus(toApply);
+  if (newCleared.gt(fine)) newCleared = fine;
+  newCleared = round(newCleared, precision.fine);
+
+  const remaining = round(fine.minus(newCleared), precision.fine);
+  return {
+    clearedAmount: newCleared.toFixed(precision.fine),
+    status: computeClearStatus(fine, newCleared, precision),
+    remaining: remaining.isNegative() ? (0).toFixed(precision.fine) : remaining.toFixed(precision.fine),
   };
 }
 

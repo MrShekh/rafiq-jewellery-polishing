@@ -48,6 +48,10 @@ export interface OrderDoc {
     fineTotal: string;
     weightIn2?: string | null;
     weightOut2?: string | null;
+    pieces2?: number | null;
+    clearedAmount: string;
+    clearStatus: "open" | "partial" | "cleared";
+    clearedAt?: string | null;
     weightExceedsConfirmed: boolean;
     notes?: string | null;
     createdBy?: string | null;

@@ -86,11 +86,15 @@ function SummaryCard({ title, data }: { title: string; data?: OrderTotals & { or
       <CardContent className="grid grid-cols-2 gap-4 sm:grid-cols-4">
         <Stat label="Orders" value={data?.orderCount.toLocaleString() ?? "-"} />
         <Stat label="Pieces" value={data?.totalPieces.toLocaleString() ?? "-"} />
-        <Stat label="Weight In" value={data?.totalWeightIn ?? "-"} />
-        <Stat label="Weight Out" value={data?.totalWeightOut ?? "-"} />
+        <Stat label="Weight In 1" value={data?.totalWeightIn ?? "-"} />
+        <Stat label="Weight Out 1" value={data?.totalWeightOut ?? "-"} />
+        <Stat label="Weight In 2" value={data?.totalWeightIn2 ?? "-"} />
+        <Stat label="Weight Out 2" value={data?.totalWeightOut2 ?? "-"} />
+        <Stat label="Pieces 2" value={data?.totalPieces2.toLocaleString() ?? "-"} />
         <Stat label="Making Charge" value={data?.totalMakingCharge ?? "-"} />
         <Stat label="Loss" value={data?.totalLoss ?? "-"} />
-        <Stat label="Fine Total" value={data?.totalFineTotal ?? "-"} emphasize />
+        <Stat label="Fine Total (Due)" value={data?.totalFineTotal ?? "-"} emphasize />
+        <Stat label="Return to Customer" value={data?.totalCleared ?? "-"} />
       </CardContent>
     </Card>
   );

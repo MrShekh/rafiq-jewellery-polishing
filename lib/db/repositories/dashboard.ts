@@ -29,7 +29,20 @@ async function summarizeRange(
   const rows = await c
     .find(
       { userId, deletedAt: null, orderDate: { $gte: startDate, $lte: endDate } },
-      { projection: { pieces: 1, weightIn: 1, weightOut: 1, makingCharge: 1, loss: 1, fineTotal: 1, weightIn2: 1, weightOut2: 1 } },
+      {
+        projection: {
+          pieces: 1,
+          weightIn: 1,
+          weightOut: 1,
+          makingCharge: 1,
+          loss: 1,
+          fineTotal: 1,
+          weightIn2: 1,
+          weightOut2: 1,
+          pieces2: 1,
+          clearedAmount: 1,
+        },
+      },
     )
     .toArray();
 

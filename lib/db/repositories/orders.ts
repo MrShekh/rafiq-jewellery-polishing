@@ -1,7 +1,13 @@
 import { nanoid } from "nanoid";
 import { col, mapDoc, mapDocs } from "@/lib/db/mongo";
 import { type OrderDoc, type CustomerDoc } from "@/lib/db/types";
-import { calculateOrder, calculateOrderTotals, type OrderTotals } from "@/lib/calculations";
+import {
+  applyFineClear,
+  calculateOrder,
+  calculateOrderTotals,
+  reconcileClearAfterEdit,
+  type OrderTotals,
+} from "@/lib/calculations";
 import { datePrefixForOrderNumber, formatOrderNumber } from "@/lib/ids/orderId";
 import type { OrderFilter, OrderInput } from "@/lib/validation/order";
 import { getFormulaVersion, getPrecisionPolicy } from "@/lib/db/repositories/settings";
@@ -38,6 +44,14 @@ export async function listOrders(userId: string, filter: OrderFilter): Promise<O
   const query: Record<string, unknown> = { userId };
 
   if (!filter.includeDeleted) query.deletedAt = null;
+  // Orders created before clearing existed have no clearStatus field yet;
+  // `$in` with `null` matches both an explicit "open"/"partial" value AND a
+  // missing field, so old orders correctly stay in the default "active" view.
+  if (filter.status === "active") {
+    query.clearStatus = { $in: ["open", "partial", null] };
+  } else if (filter.status === "cleared") {
+    query.clearStatus = "cleared";
+  }
   if (filter.customerId) query.customerId = filter.customerId;
   if (filter.item) query.item = filter.item;
   if (filter.dateFrom || filter.dateTo) {
@@ -75,7 +89,18 @@ export async function listOrders(userId: string, filter: OrderFilter): Promise<O
   // Totals across the full filtered set (not just the page)
   const allRows = await c
     .find(query as any, {
-      projection: { pieces: 1, weightIn: 1, weightOut: 1, makingCharge: 1, loss: 1, fineTotal: 1, weightIn2: 1, weightOut2: 1 },
+      projection: {
+        pieces: 1,
+        weightIn: 1,
+        weightOut: 1,
+        makingCharge: 1,
+        loss: 1,
+        fineTotal: 1,
+        weightIn2: 1,
+        weightOut2: 1,
+        pieces2: 1,
+        clearedAmount: 1,
+      },
     })
     .toArray();
 
@@ -147,6 +172,10 @@ export async function createOrder(
     fineTotal: calc.fineTotalString,
     weightIn2: input.weightIn2 ? Number(input.weightIn2).toFixed(precision.weight) : null,
     weightOut2: input.weightOut2 ? Number(input.weightOut2).toFixed(precision.weight) : null,
+    pieces2: input.pieces2 ?? null,
+    clearedAmount: Number(0).toFixed(precision.fine),
+    clearStatus: "open",
+    clearedAt: null,
     weightExceedsConfirmed: input.weightExceedsConfirmed ?? false,
     notes: input.notes ?? null,
     createdBy: userId,
@@ -183,6 +212,7 @@ export async function updateOrder(
     touch: input.touch ?? existing.touch,
     weightIn2: input.weightIn2 !== undefined ? input.weightIn2 : existing.weightIn2,
     weightOut2: input.weightOut2 !== undefined ? input.weightOut2 : existing.weightOut2,
+    pieces2: input.pieces2 !== undefined ? input.pieces2 : existing.pieces2,
     notes: input.notes !== undefined ? input.notes : existing.notes,
     weightExceedsConfirmed: input.weightExceedsConfirmed !== undefined
       ? input.weightExceedsConfirmed
@@ -215,6 +245,11 @@ export async function updateOrder(
     );
   }
 
+  // If this edit changed fineTotal, clearedAmount can't be left exceeding
+  // it - clamp and re-derive clearStatus so numbers stay internally
+  // consistent (e.g. weights edited down after a partial clear).
+  const reconciled = reconcileClearAfterEdit(calc.fineTotalString, existing.clearedAmount ?? 0, precision);
+
   const now = new Date().toISOString();
   const updates: Partial<OrderDoc> = {
     orderDate: merged.orderDate,
@@ -230,6 +265,9 @@ export async function updateOrder(
     fineTotal: calc.fineTotalString,
     weightIn2: merged.weightIn2 ? Number(merged.weightIn2).toFixed(precision.weight) : null,
     weightOut2: merged.weightOut2 ? Number(merged.weightOut2).toFixed(precision.weight) : null,
+    pieces2: merged.pieces2 ?? null,
+    clearedAmount: reconciled.clearedAmount,
+    clearStatus: reconciled.status,
     weightExceedsConfirmed: merged.weightExceedsConfirmed,
     notes: merged.notes,
     updatedBy: userId,
@@ -240,6 +278,37 @@ export async function updateOrder(
   await c.updateOne({ _id: id, userId }, { $set: updates });
   logger.info("Order updated", { orderId: id });
   return { order: await getOrderById(userId, id), warnings };
+}
+
+/** Records a full or partial fine settlement against one order. */
+export async function clearOrderFine(userId: string, id: string, amount: "full" | string): Promise<OrderMutationResult> {
+  const precision = await getPrecisionPolicy(userId);
+  const existing = await getOrderById(userId, id);
+  if (existing.deletedAt) throw new ConflictError("Cannot clear a deleted order");
+
+  let result;
+  try {
+    result = applyFineClear(existing.fineTotal, existing.clearedAmount ?? 0, amount, precision);
+  } catch (err) {
+    throw new ConflictError(err instanceof Error ? err.message : "Could not clear this order");
+  }
+
+  const now = new Date().toISOString();
+  const c = await col<OrderDoc>("orders");
+  await c.updateOne(
+    { _id: id, userId },
+    {
+      $set: {
+        clearedAmount: result.clearedAmount,
+        clearStatus: result.status,
+        clearedAt: now,
+        updatedAt: now,
+        updatedBy: userId,
+      },
+    },
+  );
+  logger.info("Order fine cleared", { orderId: id, amount, newStatus: result.status });
+  return { order: await getOrderById(userId, id), warnings: [] };
 }
 
 export async function softDeleteOrder(userId: string, id: string) {

@@ -24,7 +24,43 @@ export async function listCustomers(
     query.$or = [{ name: re }, { phone: re }];
   }
   const docs = await c.find(query).sort({ name: 1 }).toArray();
-  return mapDocs(docs);
+
+  const orders = await col<OrderDoc>("orders");
+  const dueAgg = await orders
+    .aggregate([
+      { $match: { userId, deletedAt: null } },
+      {
+        $group: {
+          _id: "$customerId",
+          orderCount: { $sum: 1 },
+          due: {
+            $sum: {
+              $max: [
+                {
+                  $subtract: [
+                    { $toDouble: "$fineTotal" },
+                    { $toDouble: { $ifNull: ["$clearedAmount", "0"] } },
+                  ],
+                },
+                0,
+              ],
+            },
+          },
+        },
+      },
+    ])
+    .toArray();
+  const dueMap = new Map(dueAgg.map((d: any) => [d._id as string, { due: d.due as number, orderCount: d.orderCount as number }]));
+  const precision = await getPrecisionPolicy(userId);
+
+  return mapDocs(docs).map((customer) => {
+    const agg = dueMap.get(customer._id);
+    return {
+      ...customer,
+      orderCount: agg?.orderCount ?? 0,
+      dueFine: (agg?.due ?? 0).toFixed(precision.fine),
+    };
+  });
 }
 
 export async function getCustomerById(userId: string, id: string): Promise<any> {
@@ -110,9 +146,13 @@ export interface CustomerSummary {
   totalWeightIn: string;
   totalWeightOut: string;
   totalLoss: string;
+  /** Outstanding fine only (already-cleared amounts are excluded) - see lib/calculations#outstandingFine. */
   totalFine: string;
   totalWeightIn2: string;
   totalWeightOut2: string;
+  totalPieces2: number;
+  /** How much fine has already been settled/returned to this customer - shown alongside totalFine (outstanding) for context. */
+  totalReturned: string;
 }
 
 export async function getCustomerSummary(userId: string, customerId: string): Promise<CustomerSummary> {
@@ -129,6 +169,8 @@ export async function getCustomerSummary(userId: string, customerId: string): Pr
       fineTotal: r.fineTotal,
       weightIn2: r.weightIn2,
       weightOut2: r.weightOut2,
+      pieces2: r.pieces2,
+      clearedAmount: r.clearedAmount,
     })),
     precision,
   );
@@ -142,6 +184,8 @@ export async function getCustomerSummary(userId: string, customerId: string): Pr
     totalFine: totals.totalFineTotal,
     totalWeightIn2: totals.totalWeightIn2,
     totalWeightOut2: totals.totalWeightOut2,
+    totalPieces2: totals.totalPieces2,
+    totalReturned: totals.totalCleared,
   };
 }
 

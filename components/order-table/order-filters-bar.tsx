@@ -20,6 +20,7 @@ export interface OrderFiltersState {
   customerId: string; // "" = all
   item: string; // "" = all
   dateRange: DateRange;
+  status: "active" | "cleared" | "all"; // "active" = open + partial, hides fully-cleared orders
 }
 
 export function OrderFiltersBar({
@@ -29,18 +30,28 @@ export function OrderFiltersBar({
   onExport,
   onPrint,
   resultCount,
+  showCustomerFilter = true,
 }: {
   filters: OrderFiltersState;
   onChange: (filters: OrderFiltersState) => void;
-  onAddOrder: () => void;
-  onExport: () => void;
+  onAddOrder?: () => void;
+  onExport?: () => void;
   onPrint: () => void;
   resultCount?: number;
+  /** Hide the "All customers" dropdown - e.g. on a single customer's own order history, where it'd always be that one customer. */
+  showCustomerFilter?: boolean;
 }) {
   const { customers } = useCustomers();
   const items = useItemOptions();
 
-  const hasActiveFilters = !!(filters.search || filters.customerId || filters.item || filters.dateRange.from || filters.dateRange.to);
+  const hasActiveFilters = !!(
+    filters.search ||
+    filters.customerId ||
+    filters.item ||
+    filters.dateRange.from ||
+    filters.dateRange.to ||
+    filters.status !== "active"
+  );
 
   return (
     <div className="flex flex-wrap items-center gap-2 border-b bg-card px-3 py-2 no-print">
@@ -54,18 +65,20 @@ export function OrderFiltersBar({
         />
       </div>
 
-      <Select
-        value={filters.customerId || "__all__"}
-        onValueChange={(v) => onChange({ ...filters, customerId: v === "__all__" ? "" : v })}
-      >
-        <SelectTrigger className="h-8 w-44"><SelectValue placeholder="All customers" /></SelectTrigger>
-        <SelectContent>
-          <SelectItem value="__all__">All customers</SelectItem>
-          {customers.map((c) => (
-            <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+      {showCustomerFilter && (
+        <Select
+          value={filters.customerId || "__all__"}
+          onValueChange={(v) => onChange({ ...filters, customerId: v === "__all__" ? "" : v })}
+        >
+          <SelectTrigger className="h-8 w-44"><SelectValue placeholder="All customers" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__all__">All customers</SelectItem>
+            {customers.map((c) => (
+              <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      )}
 
       <Select
         value={filters.item || "__all__"}
@@ -82,12 +95,24 @@ export function OrderFiltersBar({
 
       <DateFilter value={filters.dateRange} onChange={(dateRange) => onChange({ ...filters, dateRange })} />
 
+      <Select
+        value={filters.status}
+        onValueChange={(v) => onChange({ ...filters, status: v as OrderFiltersState["status"] })}
+      >
+        <SelectTrigger className="h-8 w-40"><SelectValue /></SelectTrigger>
+        <SelectContent>
+          <SelectItem value="active">Open &amp; partial</SelectItem>
+          <SelectItem value="cleared">Fully cleared</SelectItem>
+          <SelectItem value="all">All orders</SelectItem>
+        </SelectContent>
+      </Select>
+
       {hasActiveFilters && (
         <Button
           variant="ghost"
           size="sm"
           className="h-8 gap-1 text-muted-foreground"
-          onClick={() => onChange({ search: "", customerId: "", item: "", dateRange: {} })}
+          onClick={() => onChange({ search: "", customerId: "", item: "", dateRange: {}, status: "active" })}
         >
           <X className="h-3.5 w-3.5" /> Clear
         </Button>
@@ -101,12 +126,16 @@ export function OrderFiltersBar({
         <Button variant="outline" size="sm" className="gap-1.5" onClick={onPrint}>
           <Printer className="h-3.5 w-3.5" /> Print
         </Button>
-        <Button variant="outline" size="sm" className="gap-1.5" onClick={onExport}>
-          <Download className="h-3.5 w-3.5" /> Export to Excel
-        </Button>
-        <Button size="sm" className="gap-1.5" onClick={onAddOrder}>
-          <Plus className="h-3.5 w-3.5" /> Add Order
-        </Button>
+        {onExport && (
+          <Button variant="outline" size="sm" className="gap-1.5" onClick={onExport}>
+            <Download className="h-3.5 w-3.5" /> Export to Excel
+          </Button>
+        )}
+        {onAddOrder && (
+          <Button size="sm" className="gap-1.5" onClick={onAddOrder}>
+            <Plus className="h-3.5 w-3.5" /> Add Order
+          </Button>
+        )}
       </div>
     </div>
   );

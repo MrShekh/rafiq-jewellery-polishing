@@ -25,6 +25,8 @@ import type { Customer } from "@/db/schema";
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json());
 
+type CustomerWithDue = Customer & { dueFine?: string; orderCount?: number };
+
 export function CustomersList() {
   const [search, setSearch] = React.useState("");
   const [showInactive, setShowInactive] = React.useState(false);
@@ -36,7 +38,7 @@ export function CustomersList() {
   if (search) qs.set("search", search);
   if (showInactive) qs.set("includeInactive", "true");
 
-  const { data, mutate } = useSWR<{ customers: Customer[] }>(`/api/customers?${qs.toString()}`, fetcher);
+  const { data, mutate } = useSWR<{ customers: CustomerWithDue[] }>(`/api/customers?${qs.toString()}`, fetcher);
   const customers = data?.customers ?? [];
 
   async function handleDeactivate() {
@@ -97,7 +99,16 @@ export function CustomersList() {
                 <Link href={`/customers/${c.id}`} className="block">
                   <div className="flex items-start justify-between gap-2">
                     <h3 className="truncate text-sm font-semibold">{c.name}</h3>
-                    {!c.isActive && <Badge variant="outline" className="shrink-0 text-muted-foreground">Inactive</Badge>}
+                    <div className="flex shrink-0 flex-wrap justify-end gap-1">
+                      {!c.isActive && <Badge variant="outline" className="text-muted-foreground">Inactive</Badge>}
+                      {!!c.orderCount && (
+                        Number(c.dueFine) > 0 ? (
+                          <Badge variant="destructive">Due: {c.dueFine}</Badge>
+                        ) : (
+                          <Badge variant="success">Cleared</Badge>
+                        )
+                      )}
+                    </div>
                   </div>
                   <div className="mt-2 space-y-1 text-xs text-muted-foreground">
                     {c.phone && (

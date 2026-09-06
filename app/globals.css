@@ -144,7 +144,49 @@
 }
 
 @media print {
+  /* The on-screen shell locks everything to one viewport with overflow-hidden/auto
+     so panels can scroll independently - great for the app, but it clips print
+     output to whatever was visible on screen. None of that should apply on paper. */
+  * {
+    overflow: visible !important;
+  }
+  html,
+  body {
+    height: auto !important;
+  }
   .no-print {
     display: none !important;
   }
+  /* Data-grid cells (Order Registry) carry fixed pixel widths sized for on-screen
+     editing; letting them size to content instead is what makes a 13+ column
+     ledger actually fit a printed page instead of being cut off on the right. */
+  table,
+  th,
+  td,
+  tr {
+    width: auto !important;
+    min-width: 0 !important;
+    max-width: none !important;
+  }
+  th,
+  td {
+    padding: 2px 6px !important;
+    font-size: 10px !important;
+  }
+  input,
+  select,
+  textarea {
+    height: auto !important;
+    min-height: 0 !important;
+    border: none !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+    color: inherit !important;
+  }
+}
+
+@page {
+  size: landscape;
+  margin: 10mm;
 }

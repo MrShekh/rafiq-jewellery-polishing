@@ -8,7 +8,7 @@ import {
   useReactTable,
   type ColumnDef,
 } from "@tanstack/react-table";
-import { ArrowDown, ArrowUp, ArrowUpDown, Trash2, X } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, Coins, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { nanoid } from "nanoid";
 
@@ -35,6 +35,7 @@ import {
 } from "@/components/order-table/editable-cells";
 import { OrderFiltersBar, type OrderFiltersState } from "@/components/order-table/order-filters-bar";
 import { DeleteOrderDialog } from "@/components/order-table/delete-order-dialog";
+import { ClearOrderDialog } from "@/components/order-table/clear-order-dialog";
 import { CustomerFormDialog } from "@/components/customer/customer-form-dialog";
 import { useCustomers } from "@/lib/hooks/use-customers";
 import { useItemOptions } from "@/lib/hooks/use-items";
@@ -88,6 +89,7 @@ export function OrderRegistryTable() {
     customerId: "",
     item: "",
     dateRange: {},
+    status: "active",
   });
   const [sortBy, setSortBy] = React.useState<string>("orderDate");
   const [sortDir, setSortDir] = React.useState<"asc" | "desc">("desc");
@@ -95,6 +97,7 @@ export function OrderRegistryTable() {
   const [pageSize, setPageSize] = React.useState(100);
   const [draft, setDraft] = React.useState<DraftOrder | null>(null);
   const [deleteTarget, setDeleteTarget] = React.useState<Order | null>(null);
+  const [clearTarget, setClearTarget] = React.useState<Order | null>(null);
   const [quickAddCustomer, setQuickAddCustomer] = React.useState<{ open: boolean; initialName: string }>({
     open: false,
     initialName: "",
@@ -112,6 +115,7 @@ export function OrderRegistryTable() {
     if (filters.item) params.set("item", filters.item);
     if (filters.dateRange.from) params.set("dateFrom", filters.dateRange.from);
     if (filters.dateRange.to) params.set("dateTo", filters.dateRange.to);
+    params.set("status", filters.status);
     params.set("sortBy", sortBy);
     params.set("sortDir", sortDir);
     params.set("page", String(page));
@@ -149,7 +153,10 @@ export function OrderRegistryTable() {
 
       // Clearing 2nd polishing step: empty string → null
       if ((field === "weightIn2" || field === "weightOut2") && rawValue === "") {
-        payload = { weightIn2: null, weightOut2: null };
+        payload = { weightIn2: null, weightOut2: null, pieces2: null };
+      }
+      if (field === "pieces2") {
+        payload = { pieces2: rawValue === "" ? null : Number(rawValue) };
       }
 
       if (field === "weightOut" || field === "weightIn") {
@@ -377,6 +384,29 @@ export function OrderRegistryTable() {
         },
       },
       {
+        id: "pieces2",
+        header: "Pieces 2",
+        size: 80,
+        cell: ({ row }) => {
+          const has2 = row.original.weightIn2 != null;
+          if (!has2) return <div className="h-8" />;
+          return (
+            <GridTextInput
+              rowId={row.original.id}
+              columnKey="pieces2"
+              refs={cellRefs}
+              rowOrder={rowOrder}
+              onNavigate={navigate}
+              value={String((row.original as any).pieces2 ?? row.original.pieces)}
+              onCommit={(v) => commitField(row.original, "pieces2", v)}
+              type="number"
+              align="right"
+              min="0"
+            />
+          );
+        },
+      },
+      {
         id: "makingCharge",
         header: "Making Charge",
         size: 130,
@@ -433,47 +463,76 @@ export function OrderRegistryTable() {
         id: "fineTotal",
         header: "Fine Total",
         size: 100,
-        cell: ({ row }) => <ReadOnlyCell value={row.original.fineTotal} emphasize />,
+        cell: ({ row }) => {
+          const fine = Number(row.original.fineTotal);
+          const cleared = Number((row.original as any).clearedAmount ?? 0);
+          const outstanding = Math.max(fine - cleared, 0).toFixed(3);
+          return <ReadOnlyCell value={outstanding} emphasize />;
+        },
       },
       {
         id: "actions",
         header: "",
-        size: 80,
-        cell: ({ row }) => (
-          <div className="flex items-center gap-0.5">
-            <Button
-              variant="ghost"
-              size="sm"
-              className={cn(
-                "h-7 px-1.5 text-xs font-medium",
-                row.original.weightIn2 != null
-                  ? "text-amber-600 hover:text-amber-700"
-                  : "text-muted-foreground hover:text-primary",
-              )}
-              onClick={() => {
-                if (row.original.weightIn2 != null) {
-                  commitField(row.original, "weightIn2", "");
-                  commitField(row.original, "weightOut2", "");
-                } else {
-                  commitField(row.original, "weightIn2", "0.000");
-                  commitField(row.original, "weightOut2", "0.000");
-                }
-              }}
-              title={row.original.weightIn2 != null ? "Remove 2nd polishing step" : "Add 2nd polishing step"}
-            >
-              {row.original.weightIn2 != null ? "−2nd" : "+2nd"}
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7 text-muted-foreground opacity-0 hover:text-destructive group-hover:opacity-100"
-              onClick={() => setDeleteTarget(row.original)}
-              aria-label="Delete order"
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-            </Button>
-          </div>
-        ),
+        size: 150,
+        cell: ({ row }) => {
+          const status = ((row.original as any).clearStatus as string | undefined) ?? "open";
+          return (
+            <div className="flex items-center gap-0.5 no-print">
+              <span
+                className={cn(
+                  "h-2 w-2 shrink-0 rounded-full",
+                  status === "cleared" && "bg-success",
+                  status === "partial" && "bg-warning",
+                  status === "open" && "bg-destructive/60",
+                )}
+                title={status === "cleared" ? "Fully cleared" : status === "partial" ? "Partially cleared" : "Open"}
+              />
+              <Button
+                variant="ghost"
+                size="sm"
+                className={cn(
+                  "h-7 px-1.5 text-xs font-medium",
+                  row.original.weightIn2 != null
+                    ? "text-amber-600 hover:text-amber-700"
+                    : "text-muted-foreground hover:text-primary",
+                )}
+                onClick={() => {
+                  if (row.original.weightIn2 != null) {
+                    commitField(row.original, "weightIn2", "");
+                    commitField(row.original, "weightOut2", "");
+                    commitField(row.original, "pieces2", "");
+                  } else {
+                    commitField(row.original, "weightIn2", "0.000");
+                    commitField(row.original, "weightOut2", "0.000");
+                    commitField(row.original, "pieces2", String(row.original.pieces));
+                  }
+                }}
+                title={row.original.weightIn2 != null ? "Remove 2nd polishing step" : "Add 2nd polishing step"}
+              >
+                {row.original.weightIn2 != null ? "−2nd" : "+2nd"}
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7 text-muted-foreground hover:text-primary"
+                onClick={() => setClearTarget(row.original)}
+                aria-label="Clear fine"
+                title="Clear fine (full or partial)"
+              >
+                <Coins className="h-3.5 w-3.5" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7 text-muted-foreground opacity-0 hover:text-destructive group-hover:opacity-100"
+                onClick={() => setDeleteTarget(row.original)}
+                aria-label="Delete order"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          );
+        },
       },
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -652,6 +711,13 @@ export function OrderRegistryTable() {
         orderLabel={deleteTarget ? `${deleteTarget.orderNumber} - ${deleteTarget.customerNameSnapshot} - ${deleteTarget.item}` : undefined}
       />
 
+      <ClearOrderDialog
+        open={!!clearTarget}
+        onOpenChange={(open) => !open && setClearTarget(null)}
+        order={clearTarget}
+        onCleared={() => mutate()}
+      />
+
       <CustomerFormDialog
         open={quickAddCustomer.open}
         onOpenChange={(open) => setQuickAddCustomer((s) => ({ ...s, open }))}
@@ -668,18 +734,22 @@ export function OrderRegistryTable() {
 function TotalsFooter({ totals }: { totals?: OrderTotals }) {
   if (!totals) return null;
   return (
-    <div className="grid shrink-0 grid-cols-[120px_200px_150px_80px_100px_100px_100px_100px_130px_90px_80px_100px_80px] border-t-2 border-primary/40 bg-table-totals text-xs font-semibold">
+    <div className="grid shrink-0 grid-cols-[120px_200px_150px_80px_100px_100px_100px_100px_80px_130px_90px_80px_100px_150px] border-t-2 border-primary/40 bg-table-totals text-xs font-semibold">
       <div className="col-span-3 flex items-center px-3 py-1.5">TOTAL</div>
       <div className="flex items-center justify-end px-3 py-1.5 tabular-nums">{totals.totalPieces}</div>
       <div className="flex items-center justify-end px-3 py-1.5 tabular-nums">{totals.totalWeightIn}</div>
       <div className="flex items-center justify-end px-3 py-1.5 tabular-nums">{totals.totalWeightOut}</div>
       <div className="flex items-center justify-end px-3 py-1.5 tabular-nums">{totals.totalWeightIn2 || "0.000"}</div>
       <div className="flex items-center justify-end px-3 py-1.5 tabular-nums">{totals.totalWeightOut2 || "0.000"}</div>
+      <div className="flex items-center justify-end px-3 py-1.5 tabular-nums">{totals.totalPieces2}</div>
       <div className="flex items-center justify-end px-3 py-1.5 tabular-nums">{totals.totalMakingCharge}</div>
       <div className="flex items-center justify-end px-3 py-1.5 tabular-nums">{totals.totalLoss}</div>
       <div className="px-3 py-1.5" />
       <div className="flex items-center justify-end px-3 py-1.5 tabular-nums">{totals.totalFineTotal}</div>
-      <div />
+      <div className="flex flex-col items-end justify-center px-3 py-1 leading-tight">
+        <span className="text-[10px] font-normal normal-case text-muted-foreground">Return to Customer</span>
+        <span className="tabular-nums">{totals.totalCleared}</span>
+      </div>
     </div>
   );
 }

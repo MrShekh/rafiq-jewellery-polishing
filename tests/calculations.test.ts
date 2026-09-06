@@ -5,6 +5,10 @@ import {
   calculateFineTotal,
   calculateOrder,
   calculateOrderTotals,
+  applyFineClear,
+  computeClearStatus,
+  outstandingFine,
+  reconcileClearAfterEdit,
   DEFAULT_PRECISION,
 } from "@/lib/calculations";
 
@@ -92,5 +96,86 @@ describe("calculateOrderTotals", () => {
     expect(totals.totalPieces).toBe(0);
     expect(totals.totalWeightIn).toBe("0.000");
     expect(totals.totalFineTotal).toBe("0.000");
+  });
+
+  it("sums outstanding fine (fineTotal minus clearedAmount), not the raw historical total", () => {
+    const totals = calculateOrderTotals(
+      [
+        { pieces: 1, weightIn: "10", weightOut: "9", makingCharge: "0", loss: "1", fineTotal: "0.750", clearedAmount: "0.250" },
+        { pieces: 1, weightIn: "10", weightOut: "9", makingCharge: "0", loss: "1", fineTotal: "0.500", clearedAmount: "0.500" },
+        { pieces: 1, weightIn: "10", weightOut: "9", makingCharge: "0", loss: "1", fineTotal: "0.300" }, // no clearedAmount at all (pre-existing order)
+      ],
+      DEFAULT_PRECISION,
+    );
+    // (0.750 - 0.250) + (0.500 - 0.500) + (0.300 - 0) = 0.500 + 0.000 + 0.300
+    expect(totals.totalFineTotal).toBe("0.800");
+    // totalCleared is the companion stat: 0.250 + 0.500 + 0 = 0.750
+    expect(totals.totalCleared).toBe("0.750");
+  });
+});
+
+describe("outstandingFine", () => {
+  it("subtracts what has already been cleared", () => {
+    expect(outstandingFine("1.000", "0.400").toFixed(3)).toBe("0.600");
+  });
+
+  it("floors at zero rather than going negative", () => {
+    expect(outstandingFine("1.000", "1.500").toFixed(3)).toBe("0.000");
+  });
+
+  it("treats a missing clearedAmount as zero", () => {
+    expect(outstandingFine("1.000", undefined).toFixed(3)).toBe("1.000");
+  });
+});
+
+describe("computeClearStatus", () => {
+  it("is open when nothing has been cleared", () => {
+    expect(computeClearStatus("1.000", "0")).toBe("open");
+  });
+  it("is partial when some but not all has been cleared", () => {
+    expect(computeClearStatus("1.000", "0.400")).toBe("partial");
+  });
+  it("is cleared once the cleared amount reaches the fine total", () => {
+    expect(computeClearStatus("1.000", "1.000")).toBe("cleared");
+  });
+});
+
+describe("applyFineClear", () => {
+  it("clears a partial amount and reports the new remaining balance", () => {
+    const result = applyFineClear("1.000", "0", "0.400");
+    expect(result.clearedAmount).toBe("0.400");
+    expect(result.status).toBe("partial");
+    expect(result.remaining).toBe("0.600");
+  });
+
+  it("'full' clears exactly whatever is left, regardless of prior partial clears", () => {
+    const result = applyFineClear("1.000", "0.400", "full");
+    expect(result.clearedAmount).toBe("1.000");
+    expect(result.status).toBe("cleared");
+    expect(result.remaining).toBe("0.000");
+  });
+
+  it("rejects a zero or negative amount", () => {
+    expect(() => applyFineClear("1.000", "0", "0")).toThrow();
+    expect(() => applyFineClear("1.000", "0", "-0.100")).toThrow();
+  });
+
+  it("rejects clearing more than what remains due", () => {
+    expect(() => applyFineClear("1.000", "0.400", "0.700")).toThrow();
+  });
+});
+
+describe("reconcileClearAfterEdit", () => {
+  it("leaves clearedAmount untouched when it still fits under the new fineTotal", () => {
+    const result = reconcileClearAfterEdit("1.000", "0.400");
+    expect(result.clearedAmount).toBe("0.400");
+    expect(result.status).toBe("partial");
+  });
+
+  it("clamps clearedAmount down when an edit shrinks fineTotal below what was already cleared", () => {
+    // Order was fully cleared at fineTotal 1.000, then weights were edited down to 0.300.
+    const result = reconcileClearAfterEdit("0.300", "1.000");
+    expect(result.clearedAmount).toBe("0.300");
+    expect(result.status).toBe("cleared");
   });
 });

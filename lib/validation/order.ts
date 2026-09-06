@@ -53,6 +53,12 @@ export const orderObjectSchema = z.object({
   touch: nonNegativeDecimalString,
   weightIn2: optionalDecimalString,
   weightOut2: optionalDecimalString,
+  pieces2: z.coerce
+    .number()
+    .int("Pieces must be a whole number")
+    .min(0, "Pieces must be 0 or greater")
+    .optional()
+    .nullable(),
   notes: z.string().max(2000).optional().nullable(),
   // User's explicit confirmation that Weight Out > Weight In is intentional
   // (e.g. an additional piece was added during polishing). Section 10.
@@ -114,6 +120,7 @@ export interface OrderInput {
   touch: string;
   weightIn2?: string | null;
   weightOut2?: string | null;
+  pieces2?: number | null;
   notes?: string | null;
   weightExceedsConfirmed?: boolean;
 }
@@ -136,6 +143,16 @@ export const orderFilterSchema = z.object({
     .default("orderDate"),
   sortDir: z.enum(["asc", "desc"]).default("desc"),
   includeDeleted: z.coerce.boolean().default(false),
+  // "active" (default) hides fully-cleared orders without deleting them;
+  // "cleared" shows only fully-cleared orders; "all" shows every status.
+  status: z.enum(["active", "cleared", "all"]).default("active"),
 });
 
 export type OrderFilter = z.infer<typeof orderFilterSchema>;
+
+/** Full clear settles whatever is left; partial clears a specific decimal amount. */
+export const orderClearSchema = z.object({
+  amount: z.union([z.literal("full"), nonNegativeDecimalString]),
+});
+
+export type OrderClearInput = z.infer<typeof orderClearSchema>;
