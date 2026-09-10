@@ -146,8 +146,11 @@ export async function createOrder(
 
   const warnings: string[] = [];
   if (calc.isLossNegative) {
+    const grossLoss = Number(input.weightIn) - Number(input.weightOut);
     warnings.push(
-      `Loss calculated as ${calc.lossString}, which is negative. Double-check Weight In, Weight Out, and Making Charge.`,
+      `Making Charge (${Number(input.makingCharge).toFixed(precision.weight)}g) exceeds gross loss (${grossLoss.toFixed(precision.weight)}g). ` +
+      `Loss is ${calc.lossString}g — customer will pay ` +
+      `${calc.fineTotalString}g fine to karigar.`,
     );
   }
 
@@ -240,8 +243,11 @@ export async function updateOrder(
 
   const warnings: string[] = [];
   if (calc.isLossNegative) {
+    const grossLoss = Number(merged.weightIn) - Number(merged.weightOut);
     warnings.push(
-      `Loss calculated as ${calc.lossString}, which is negative. Double-check Weight In, Weight Out, and Making Charge.`,
+      `Making Charge (${Number(merged.makingCharge).toFixed(precision.weight)}g) exceeds gross loss (${grossLoss.toFixed(precision.weight)}g). ` +
+      `Loss is ${calc.lossString}g — customer will pay ` +
+      `${calc.fineTotalString}g fine to karigar.`,
     );
   }
 

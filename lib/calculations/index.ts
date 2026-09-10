@@ -45,18 +45,23 @@ export type FormulaVersion = "v1-standard";
 export interface FormulaSet {
   version: FormulaVersion;
   label: string;
-  /** Loss = Weight In - Weight Out - Making Charge */
+  /** Loss = Weight In - Weight Out - Making Charge (can be negative when Making Charge > gross loss) */
   loss(input: { weightIn: Decimal; weightOut: Decimal; makingCharge: Decimal }): Decimal;
-  /** Fine Total = Loss x Touch / 100 */
+  /**
+   * Fine Total = |Loss| x Touch / 100
+   * Always uses the absolute value of Loss so Fine Total is always >= 0.
+   * When Loss is negative (Making Charge > gross loss), the customer owes
+   * the karigar that fine amount instead of receiving it back.
+   */
   fineTotal(input: { loss: Decimal; touch: Decimal }): Decimal;
 }
 
 export const FORMULA_SETS: Record<FormulaVersion, FormulaSet> = {
   "v1-standard": {
     version: "v1-standard",
-    label: "Standard (Loss = Weight In - Weight Out - Making Charge; Fine = Loss x Touch / 100)",
+    label: "Standard (Loss = Weight In - Weight Out - Making Charge; Fine = |Loss| x Touch / 100)",
     loss: ({ weightIn, weightOut, makingCharge }) => weightIn.minus(weightOut).minus(makingCharge),
-    fineTotal: ({ loss, touch }) => loss.times(touch).dividedBy(100),
+    fineTotal: ({ loss, touch }) => loss.abs().times(touch).dividedBy(100),
   },
 };
 
@@ -97,8 +102,14 @@ export interface OrderCalculationResult {
   fineTotal: Decimal;
   lossString: string;
   fineTotalString: string;
-  /** True when Loss came out negative - callers should surface a validation warning, not silently accept it (section 10). */
+  /**
+   * True when Loss is negative, meaning Making Charge exceeded the gross loss
+   * (Weight In - Weight Out). In this scenario the customer owes the karigar
+   * the Fine Total amount rather than receiving it back.
+   */
   isLossNegative: boolean;
+  /** Alias for isLossNegative - customer must pay the karigar the Fine Total. */
+  customerPaysFine: boolean;
 }
 
 export function calculateLoss(
@@ -158,6 +169,7 @@ export function calculateOrder(input: OrderCalculationInput): OrderCalculationRe
     lossString: loss.toFixed(precision.weight),
     fineTotalString: fineTotal.toFixed(precision.fine),
     isLossNegative: loss.isNegative(),
+    customerPaysFine: loss.isNegative(),
   };
 }
 
@@ -186,8 +198,18 @@ export interface OrderTotals {
   totalWeightIn2: string;
   totalWeightOut2: string;
   totalPieces2: number;
-  /** Sum of clearedAmount across orders - how much fine has already been settled/returned to customers. Shown alongside totalFineTotal so a shrinking "Fine Total" isn't the only signal. */
+  /** Sum of clearedAmount across orders - how much fine has already been settled/returned to customers. */
   totalCleared: string;
+  /**
+   * Outstanding fine where loss >= 0: karigar owes this gold back to the customer.
+   * (Normal case: polishing loss was within the making charge.)
+   */
+  totalFineToReturn: string;
+  /**
+   * Outstanding fine where loss < 0: the customer owes this gold to the karigar.
+   * (Making Charge exceeded gross loss - customer pays karigar.)
+   */
+  totalFineToCollect: string;
 }
 
 /** Fine still owed on one order: fineTotal minus whatever has already been cleared, floored at zero. */
@@ -215,6 +237,8 @@ export function calculateOrderTotals(
   let totalWeightOut2 = new Decimal(0);
   let totalPieces2 = 0;
   let totalCleared = new Decimal(0);
+  let totalFineToReturn = new Decimal(0);
+  let totalFineToCollect = new Decimal(0);
 
   for (const order of ordersList) {
     totalPieces += order.pieces;
@@ -222,8 +246,15 @@ export function calculateOrderTotals(
     totalWeightOut = totalWeightOut.plus(toDecimal(order.weightOut));
     totalMakingCharge = totalMakingCharge.plus(toDecimal(order.makingCharge));
     totalLoss = totalLoss.plus(toDecimal(order.loss));
-    totalFineTotal = totalFineTotal.plus(outstandingFine(order.fineTotal, order.clearedAmount, precision));
+    const outstanding = outstandingFine(order.fineTotal, order.clearedAmount, precision);
+    totalFineTotal = totalFineTotal.plus(outstanding);
     totalCleared = totalCleared.plus(toDecimal(order.clearedAmount ?? 0));
+    // Split outstanding fine by direction: is loss negative (customer pays karigar) or not?
+    if (toDecimal(order.loss).isNegative()) {
+      totalFineToCollect = totalFineToCollect.plus(outstanding);
+    } else {
+      totalFineToReturn = totalFineToReturn.plus(outstanding);
+    }
     if (order.weightIn2 != null && order.weightIn2 !== "") {
       totalWeightIn2 = totalWeightIn2.plus(toDecimal(order.weightIn2));
     }
@@ -246,6 +277,8 @@ export function calculateOrderTotals(
     totalWeightOut2: round(totalWeightOut2, precision.weight).toFixed(precision.weight),
     totalPieces2,
     totalCleared: round(totalCleared, precision.fine).toFixed(precision.fine),
+    totalFineToReturn: round(totalFineToReturn, precision.fine).toFixed(precision.fine),
+    totalFineToCollect: round(totalFineToCollect, precision.fine).toFixed(precision.fine),
   };
 }
 

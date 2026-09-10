@@ -55,6 +55,7 @@ describe("calculateOrder (end to end, brief section 9 example)", () => {
     expect(result.lossString).toBe("0.300");
     expect(result.fineTotalString).toBe("0.225");
     expect(result.isLossNegative).toBe(false);
+    expect(result.customerPaysFine).toBe(false);
   });
 
   it("handles second polishing step: Wt In 1 25.500 / Wt Out 1 25.100 / Making Charge 0.100 / Wt In 2 10.000 / Wt Out 2 9.800 / Touch 75 -> Loss 0.500, Fine 0.375", () => {
@@ -70,7 +71,47 @@ describe("calculateOrder (end to end, brief section 9 example)", () => {
     expect(result.fineTotalString).toBe("0.375"); // 0.5 * 75 / 100 = 0.375
     expect(result.isLossNegative).toBe(false);
   });
+
+  it("Making Charge > gross loss: Loss is negative but Fine Total is always positive (customer pays karigar)", () => {
+    // User's exact example: Wt In 50, Wt Out 45, Making Charge 6 -> gross loss = 5, Loss = -1
+    const result = calculateOrder({
+      weightIn: "50",
+      weightOut: "45",
+      makingCharge: "6",
+      touch: "75",
+    });
+    expect(result.lossString).toBe("-1.000");         // Loss is signed: 50 - 45 - 6 = -1
+    expect(result.fineTotalString).toBe("0.750");      // |Loss| × Touch / 100 = 1 × 75/100 = 0.750 (always positive)
+    expect(result.isLossNegative).toBe(true);
+    expect(result.customerPaysFine).toBe(true);
+  });
+
+  it("Normal case from user example: Wt In 50, Wt Out 45, Making Charge 2, Touch 75 -> Loss 3, Fine 2.250", () => {
+    const result = calculateOrder({
+      weightIn: "50",
+      weightOut: "45",
+      makingCharge: "2",
+      touch: "75",
+    });
+    expect(result.lossString).toBe("3.000");
+    expect(result.fineTotalString).toBe("2.250");
+    expect(result.isLossNegative).toBe(false);
+    expect(result.customerPaysFine).toBe(false);
+  });
+
+  it("Making Charge exactly equals gross loss: Loss is zero, Fine Total is zero", () => {
+    const result = calculateOrder({
+      weightIn: "50",
+      weightOut: "45",
+      makingCharge: "5",
+      touch: "75",
+    });
+    expect(result.lossString).toBe("0.000");
+    expect(result.fineTotalString).toBe("0.000");
+    expect(result.isLossNegative).toBe(false);
+  });
 });
+
 
 describe("calculateOrderTotals", () => {
   it("sums multiple orders correctly with exact decimal arithmetic", () => {

@@ -435,9 +435,21 @@ export function OrderRegistryTable() {
         id: "loss",
         header: "Loss",
         size: 90,
-        cell: ({ row }) => (
-          <ReadOnlyCell value={row.original.loss} className={cn(Number(row.original.loss) < 0 && "text-destructive")} />
-        ),
+        cell: ({ row }) => {
+          const lossVal = Number(row.original.loss);
+          const isNeg = lossVal < 0;
+          return (
+            <ReadOnlyCell
+              value={row.original.loss}
+              className={cn(isNeg && "text-destructive font-medium")}
+              title={
+                isNeg
+                  ? `Making Charge exceeds gross loss. Customer pays karigar ${Math.abs(lossVal).toFixed(3)}g fine.`
+                  : undefined
+              }
+            />
+          );
+        },
       },
       {
         id: "touch",
@@ -462,12 +474,40 @@ export function OrderRegistryTable() {
       {
         id: "fineTotal",
         header: "Fine Total",
-        size: 100,
+        size: 130,
         cell: ({ row }) => {
           const fine = Number(row.original.fineTotal);
           const cleared = Number((row.original as any).clearedAmount ?? 0);
           const outstanding = Math.max(fine - cleared, 0).toFixed(3);
-          return <ReadOnlyCell value={outstanding} emphasize />;
+          const lossNeg = Number(row.original.loss) < 0;
+          // lossNeg = customer pays karigar; else karigar returns to customer
+          return (
+            <div className="flex h-8 items-center justify-end gap-1 px-2">
+              <span className="tabular-nums font-medium">{outstanding}</span>
+              {Number(outstanding) > 0 && (
+                <span
+                  className={`inline-flex items-center gap-0.5 rounded px-1 py-0.5 text-[10px] font-semibold leading-none ${
+                    lossNeg
+                      ? "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400"
+                      : "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400"
+                  }`}
+                  title={lossNeg ? "Customer pays karigar" : "Karigar returns to customer"}
+                >
+                  {lossNeg ? (
+                    <>
+                      <ArrowUp className="h-2.5 w-2.5" />
+                      Cust Pays
+                    </>
+                  ) : (
+                    <>
+                      <ArrowDown className="h-2.5 w-2.5" />
+                      Return
+                    </>
+                  )}
+                </span>
+              )}
+            </div>
+          );
         },
       },
       {
@@ -734,22 +774,49 @@ export function OrderRegistryTable() {
 function TotalsFooter({ totals }: { totals?: OrderTotals }) {
   if (!totals) return null;
   return (
-    <div className="grid shrink-0 grid-cols-[120px_200px_150px_80px_100px_100px_100px_100px_80px_130px_90px_80px_100px_150px] border-t-2 border-primary/40 bg-table-totals text-xs font-semibold">
-      <div className="col-span-3 flex items-center px-3 py-1.5">TOTAL</div>
-      <div className="flex items-center justify-end px-3 py-1.5 tabular-nums">{totals.totalPieces}</div>
-      <div className="flex items-center justify-end px-3 py-1.5 tabular-nums">{totals.totalWeightIn}</div>
-      <div className="flex items-center justify-end px-3 py-1.5 tabular-nums">{totals.totalWeightOut}</div>
-      <div className="flex items-center justify-end px-3 py-1.5 tabular-nums">{totals.totalWeightIn2 || "0.000"}</div>
-      <div className="flex items-center justify-end px-3 py-1.5 tabular-nums">{totals.totalWeightOut2 || "0.000"}</div>
-      <div className="flex items-center justify-end px-3 py-1.5 tabular-nums">{totals.totalPieces2}</div>
-      <div className="flex items-center justify-end px-3 py-1.5 tabular-nums">{totals.totalMakingCharge}</div>
-      <div className="flex items-center justify-end px-3 py-1.5 tabular-nums">{totals.totalLoss}</div>
-      <div className="px-3 py-1.5" />
-      <div className="flex items-center justify-end px-3 py-1.5 tabular-nums">{totals.totalFineTotal}</div>
-      <div className="flex flex-col items-end justify-center px-3 py-1 leading-tight">
-        <span className="text-[10px] font-normal normal-case text-muted-foreground">Return to Customer</span>
-        <span className="tabular-nums">{totals.totalCleared}</span>
+    <div className="shrink-0 border-t-2 border-primary/40 bg-table-totals text-xs font-semibold">
+      {/* Main totals row */}
+      <div className="grid grid-cols-[120px_200px_150px_80px_100px_100px_100px_100px_80px_130px_90px_80px_130px_150px]">
+        <div className="col-span-3 flex items-center px-3 py-1.5">TOTAL</div>
+        <div className="flex items-center justify-end px-3 py-1.5 tabular-nums">{totals.totalPieces}</div>
+        <div className="flex items-center justify-end px-3 py-1.5 tabular-nums">{totals.totalWeightIn}</div>
+        <div className="flex items-center justify-end px-3 py-1.5 tabular-nums">{totals.totalWeightOut}</div>
+        <div className="flex items-center justify-end px-3 py-1.5 tabular-nums">{totals.totalWeightIn2 || "0.000"}</div>
+        <div className="flex items-center justify-end px-3 py-1.5 tabular-nums">{totals.totalWeightOut2 || "0.000"}</div>
+        <div className="flex items-center justify-end px-3 py-1.5 tabular-nums">{totals.totalPieces2}</div>
+        <div className="flex items-center justify-end px-3 py-1.5 tabular-nums">{totals.totalMakingCharge}</div>
+        <div className="flex items-center justify-end px-3 py-1.5 tabular-nums">{totals.totalLoss}</div>
+        <div className="px-3 py-1.5" />
+        {/* Fine Total cell: show combined total */}
+        <div className="flex flex-col items-end justify-center px-2 py-1 leading-tight">
+          <span className="text-[10px] font-normal normal-case text-muted-foreground">Fine Total</span>
+          <span className="tabular-nums">{totals.totalFineTotal}</span>
+        </div>
+        {/* Fine breakdown column */}
+        <div className="flex flex-col items-end justify-center px-2 py-1 leading-tight">
+          <span className="text-[10px] font-normal normal-case text-muted-foreground">Settled</span>
+          <span className="tabular-nums">{totals.totalCleared}</span>
+        </div>
       </div>
+
+      {/* Fine direction breakdown banner */}
+      {(Number(totals.totalFineToReturn) > 0 || Number(totals.totalFineToCollect) > 0) && (
+        <div className="flex items-center gap-4 border-t border-primary/20 px-3 py-1.5">
+          <span className="text-[10px] font-normal uppercase tracking-wide text-muted-foreground">Fine breakdown:</span>
+          {Number(totals.totalFineToReturn) > 0 && (
+            <span className="inline-flex items-center gap-1 rounded-md bg-emerald-100 px-2 py-0.5 text-[11px] font-semibold text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400">
+              <ArrowDown className="h-3 w-3" />
+              You Return to Customer: {totals.totalFineToReturn}g
+            </span>
+          )}
+          {Number(totals.totalFineToCollect) > 0 && (
+            <span className="inline-flex items-center gap-1 rounded-md bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-700 dark:bg-amber-900/40 dark:text-amber-400">
+              <ArrowUp className="h-3 w-3" />
+              Customer Pays You: {totals.totalFineToCollect}g
+            </span>
+          )}
+        </div>
+      )}
     </div>
   );
 }

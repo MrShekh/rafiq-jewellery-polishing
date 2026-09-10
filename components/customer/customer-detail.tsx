@@ -3,7 +3,7 @@
 import * as React from "react";
 import Link from "next/link";
 import useSWR from "swr";
-import { ArrowLeft, Phone, MapPin, StickyNote } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowUp, MapPin, Phone, StickyNote } from "lucide-react";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -92,7 +92,7 @@ export function CustomerDetail({ customerId }: { customerId: string }) {
         </div>
       </div>
 
-      <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-8 no-print">
+      <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-6 no-print">
         <SummaryTile label="Total Orders" value={summary.totalOrders.toLocaleString()} />
         <SummaryTile label="Total Pieces" value={summary.totalPieces.toLocaleString()} />
         <SummaryTile label="Total Wt In 1" value={summary.totalWeightIn} />
@@ -101,8 +101,20 @@ export function CustomerDetail({ customerId }: { customerId: string }) {
         <SummaryTile label="Total Wt Out 2" value={summary.totalWeightOut2 || "0.000"} />
         <SummaryTile label="Total Pieces 2" value={summary.totalPieces2.toLocaleString()} />
         <SummaryTile label="Total Loss" value={summary.totalLoss} />
-        <SummaryTile label="Total Fine (Due)" value={summary.totalFine} emphasize />
-        <SummaryTile label="Return to Customer" value={summary.totalReturned} />
+        {/* Fine direction tiles — always visible so it's clear who owes whom */}
+        <SummaryTile
+          label="Fine → You Return to Customer"
+          value={summary.totalFineToReturn ?? "0.000"}
+          variant="return"
+          emphasize={Number(summary.totalFineToReturn ?? 0) > 0}
+        />
+        <SummaryTile
+          label="Fine ← Customer Pays You"
+          value={summary.totalFineToCollect ?? "0.000"}
+          variant="collect"
+          emphasize={Number(summary.totalFineToCollect ?? 0) > 0}
+        />
+        <SummaryTile label="Already Settled" value={summary.totalReturned} />
       </div>
 
       <OrderFiltersBar
@@ -160,9 +172,40 @@ export function CustomerDetail({ customerId }: { customerId: string }) {
                     <TableCell className="px-3 py-2 text-right tabular-nums text-muted-foreground">{o.weightIn2 || "—"}</TableCell>
                     <TableCell className="px-3 py-2 text-right tabular-nums text-muted-foreground">{o.weightOut2 || "—"}</TableCell>
                     <TableCell className="px-3 py-2 text-right tabular-nums text-muted-foreground">{(o as any).pieces2 ?? "—"}</TableCell>
-                    <TableCell className="px-3 py-2 text-right tabular-nums">{o.loss}</TableCell>
+                    <TableCell
+                      className={`px-3 py-2 text-right tabular-nums${Number(o.loss) < 0 ? " font-medium text-destructive" : ""}`}
+                      title={
+                        Number(o.loss) < 0
+                          ? `Making Charge exceeds gross loss. Customer pays karigar ${Math.abs(Number(o.loss)).toFixed(3)}g fine.`
+                          : undefined
+                      }
+                    >
+                      {o.loss}
+                    </TableCell>
                     <TableCell className="px-3 py-2 text-right tabular-nums">{o.touch}</TableCell>
-                    <TableCell className="px-3 py-2 text-right font-medium tabular-nums">{outstanding}</TableCell>
+                    <TableCell
+                      className={`px-3 py-2 text-right font-medium tabular-nums`}
+                    >
+                      <div className="flex items-center justify-end gap-1">
+                        <span>{outstanding}</span>
+                        {Number(outstanding) > 0 && (
+                          <span
+                            className={`inline-flex items-center gap-0.5 rounded px-1 py-0.5 text-[10px] font-semibold leading-none ${
+                              Number(o.loss) < 0
+                                ? "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400"
+                                : "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400"
+                            }`}
+                            title={Number(o.loss) < 0 ? "Customer pays karigar" : "Karigar returns to customer"}
+                          >
+                            {Number(o.loss) < 0 ? (
+                              <><ArrowUp className="h-2.5 w-2.5" />Cust Pays</>
+                            ) : (
+                              <><ArrowDown className="h-2.5 w-2.5" />Return</>
+                            )}
+                          </span>
+                        )}
+                      </div>
+                    </TableCell>
                     <TableCell className="px-3 py-2">
                       <Badge variant={clearStatusBadgeVariant(status)}>{clearStatusLabel(status)}</Badge>
                     </TableCell>
@@ -177,13 +220,48 @@ export function CustomerDetail({ customerId }: { customerId: string }) {
   );
 }
 
-function SummaryTile({ label, value, emphasize }: { label: string; value: string; emphasize?: boolean }) {
+function SummaryTile({
+  label,
+  value,
+  emphasize,
+  variant,
+}: {
+  label: string;
+  value: string;
+  emphasize?: boolean;
+  variant?: "return" | "collect";
+}) {
+  const borderClass =
+    variant === "return"
+      ? "border-emerald-300 bg-emerald-50 dark:border-emerald-700 dark:bg-emerald-950/30"
+      : variant === "collect"
+        ? "border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-950/30"
+        : "bg-card";
+
+  const valueClass =
+    variant === "return"
+      ? "text-emerald-700 dark:text-emerald-400"
+      : variant === "collect"
+        ? "text-amber-700 dark:text-amber-400"
+        : emphasize
+          ? "text-primary"
+          : "";
+
+  const icon =
+    variant === "return" ? (
+      <ArrowDown className="inline h-3.5 w-3.5 mr-0.5 text-emerald-600 dark:text-emerald-400" />
+    ) : variant === "collect" ? (
+      <ArrowUp className="inline h-3.5 w-3.5 mr-0.5 text-amber-600 dark:text-amber-400" />
+    ) : null;
+
   return (
-    <div className="rounded-lg border bg-card p-3">
+    <div className={`rounded-lg border p-3 ${borderClass}`}>
       <div className="text-xs text-muted-foreground">{label}</div>
-      <div className={`mt-1 tabular-nums ${emphasize ? "text-lg font-semibold text-primary" : "text-lg font-medium"}`}>
+      <div className={`mt-1 tabular-nums text-lg font-semibold ${valueClass}`}>
+        {icon}
         {value}
       </div>
     </div>
   );
 }
+

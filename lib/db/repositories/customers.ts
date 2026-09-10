@@ -151,8 +151,12 @@ export interface CustomerSummary {
   totalWeightIn2: string;
   totalWeightOut2: string;
   totalPieces2: number;
-  /** How much fine has already been settled/returned to this customer - shown alongside totalFine (outstanding) for context. */
+  /** How much fine has already been settled/returned to this customer. */
   totalReturned: string;
+  /** Outstanding fine where karigar must return gold to the customer (loss >= 0). */
+  totalFineToReturn: string;
+  /** Outstanding fine where customer must pay gold to the karigar (loss < 0). */
+  totalFineToCollect: string;
 }
 
 export async function getCustomerSummary(userId: string, customerId: string): Promise<CustomerSummary> {
@@ -186,6 +190,8 @@ export async function getCustomerSummary(userId: string, customerId: string): Pr
     totalWeightOut2: totals.totalWeightOut2,
     totalPieces2: totals.totalPieces2,
     totalReturned: totals.totalCleared,
+    totalFineToReturn: totals.totalFineToReturn,
+    totalFineToCollect: totals.totalFineToCollect,
   };
 }
 

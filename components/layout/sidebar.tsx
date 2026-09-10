@@ -21,7 +21,7 @@ export function Sidebar({ user }: { user: CurrentUser }) {
     <aside className="flex w-56 shrink-0 flex-col border-r bg-card no-print">
       <div className="flex h-12 items-center gap-2 border-b px-4">
         <Gem className="h-5 w-5 text-primary" />
-        <span className="truncate text-sm font-semibold">sahin Manager</span>
+        <span className="truncate text-sm font-semibold">Polish Manager</span>
       </div>
 
       <nav className="flex-1 space-y-0.5 p-2">

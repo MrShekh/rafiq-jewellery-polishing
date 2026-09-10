@@ -134,16 +134,21 @@ export function ReadOnlyCell({
   value,
   className,
   emphasize,
+  title,
 }: {
   value: string;
   className?: string;
   emphasize?: boolean;
+  /** Native HTML tooltip shown on hover. Useful for explaining negative-loss scenario. */
+  title?: string;
 }) {
   return (
     <div
+      title={title}
       className={cn(
         "flex h-8 items-center justify-end px-3 tabular-nums text-muted-foreground",
         emphasize && "font-medium text-foreground",
+        title && "cursor-help",
         className,
       )}
     >

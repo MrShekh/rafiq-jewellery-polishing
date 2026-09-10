@@ -90,23 +90,65 @@ function SummaryCard({ title, data }: { title: string; data?: OrderTotals & { or
         <Stat label="Weight Out 1" value={data?.totalWeightOut ?? "-"} />
         <Stat label="Weight In 2" value={data?.totalWeightIn2 ?? "-"} />
         <Stat label="Weight Out 2" value={data?.totalWeightOut2 ?? "-"} />
-        <Stat label="Pieces 2" value={data?.totalPieces2.toLocaleString() ?? "-"} />
         <Stat label="Making Charge" value={data?.totalMakingCharge ?? "-"} />
         <Stat label="Loss" value={data?.totalLoss ?? "-"} />
-        <Stat label="Fine Total (Due)" value={data?.totalFineTotal ?? "-"} emphasize />
-        <Stat label="Return to Customer" value={data?.totalCleared ?? "-"} />
+
+        {/* Fine direction cards — clearly labeled so there's no confusion */}
+        <div className="col-span-2 sm:col-span-4">
+          <div className="mt-1 grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <div className="rounded-lg border border-emerald-300 bg-emerald-50 p-3 dark:border-emerald-700 dark:bg-emerald-950/30">
+              <div className="flex items-center gap-1.5 text-xs text-emerald-700 dark:text-emerald-400">
+                <span className="inline-flex items-center gap-1 font-semibold">
+                  ↓ You Return to Customer
+                </span>
+              </div>
+              <div className="mt-1 text-xl font-bold tabular-nums text-emerald-700 dark:text-emerald-400">
+                {data?.totalFineToReturn ?? "-"}
+                <span className="ml-1 text-sm font-normal">g</span>
+              </div>
+              <div className="mt-0.5 text-[11px] text-emerald-600/70 dark:text-emerald-500/70">
+                Karigar gives gold back to customer
+              </div>
+            </div>
+
+            <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 dark:border-amber-700 dark:bg-amber-950/30">
+              <div className="flex items-center gap-1.5 text-xs text-amber-700 dark:text-amber-400">
+                <span className="inline-flex items-center gap-1 font-semibold">
+                  ↑ Customer Pays You
+                </span>
+              </div>
+              <div className="mt-1 text-xl font-bold tabular-nums text-amber-700 dark:text-amber-400">
+                {data?.totalFineToCollect ?? "-"}
+                <span className="ml-1 text-sm font-normal">g</span>
+              </div>
+              <div className="mt-0.5 text-[11px] text-amber-600/70 dark:text-amber-500/70">
+                Customer pays karigar (making charge &gt; loss)
+              </div>
+            </div>
+
+            <div className="rounded-lg border bg-card p-3">
+              <div className="text-xs text-muted-foreground">Already Settled</div>
+              <div className="mt-1 text-xl font-bold tabular-nums">
+                {data?.totalCleared ?? "-"}
+                <span className="ml-1 text-sm font-normal text-muted-foreground">g</span>
+              </div>
+              <div className="mt-0.5 text-[11px] text-muted-foreground">
+                Fine already cleared/returned
+              </div>
+            </div>
+          </div>
+        </div>
       </CardContent>
     </Card>
   );
 }
 
-function Stat({ label, value, emphasize }: { label: string; value: string; emphasize?: boolean }) {
+function Stat({ label, value }: { label: string; value: string }) {
   return (
     <div>
       <div className="text-xs text-muted-foreground">{label}</div>
-      <div className={`mt-0.5 tabular-nums ${emphasize ? "text-lg font-semibold text-primary" : "text-base font-medium"}`}>
-        {value}
-      </div>
+      <div className="mt-0.5 text-base font-medium tabular-nums">{value}</div>
     </div>
   );
 }
+
