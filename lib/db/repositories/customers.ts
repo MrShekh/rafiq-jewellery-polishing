@@ -1,4 +1,5 @@
 import { nanoid } from "nanoid";
+import Decimal from "decimal.js";
 import { col, mapDoc, mapDocs } from "@/lib/db/mongo";
 import { type CustomerDoc, type OrderDoc } from "@/lib/db/types";
 import { calculateOrderTotals } from "@/lib/calculations";
@@ -33,6 +34,13 @@ export async function listCustomers(
         $group: {
           _id: "$customerId",
           orderCount: { $sum: 1 },
+          outstandingOrderCount: { $sum: { $cond: [{ $eq: ["$clearStatus", "cleared"] }, 0, 1] } },
+          net: {
+            $sum: { $multiply: [
+              { $max: [{ $subtract: [{ $toDecimal: "$fineTotal" }, { $toDecimal: { $ifNull: ["$clearedAmount", "0"] } }] }, 0] },
+              { $cond: [{ $lt: [{ $toDecimal: "$loss" }, 0] }, 1, -1] },
+            ] },
+          },
           due: {
             $sum: {
               $max: [
@@ -50,15 +58,19 @@ export async function listCustomers(
       },
     ])
     .toArray();
-  const dueMap = new Map(dueAgg.map((d: any) => [d._id as string, { due: d.due as number, orderCount: d.orderCount as number }]));
+  const dueMap = new Map(dueAgg.map((d: any) => [d._id as string, { due: d.due as number, orderCount: d.orderCount as number, net: String(d.net), outstandingOrderCount: d.outstandingOrderCount as number }]));
   const precision = await getPrecisionPolicy(userId);
 
   return mapDocs(docs).map((customer) => {
     const agg = dueMap.get(customer._id);
+    const net = new Decimal(agg?.net ?? "0").toDecimalPlaces(precision.fine);
     return {
       ...customer,
       orderCount: agg?.orderCount ?? 0,
       dueFine: (agg?.due ?? 0).toFixed(precision.fine),
+      netFine: net.abs().toFixed(precision.fine),
+      netDirection: net.isZero() ? "balanced" : net.isPositive() ? "collect" : "return",
+      outstandingOrderCount: agg?.outstandingOrderCount ?? 0,
     };
   });
 }

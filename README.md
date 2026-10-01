@@ -1,5 +1,27 @@
 # Jewellery Polishing Manager
 
+### Customer settlements
+
+Open **Customers → Review & clear balance** to settle a customer's outstanding
+orders together. The balance offsets **Customer pays you** against **You return
+to customer**, excluding amounts already cleared. **Clear Customer Balance**
+shows a fresh preview; confirming marks the included orders cleared and records
+the net payment and order snapshots together in a MongoDB transaction. A zero net
+balance can also be settled. Order history filters do not limit the settlement;
+it includes all outstanding orders for that customer across all dates. Cleared
+orders remain available through the history status filter, and recent settlements
+are shown on the customer page.
+
+The registry saves second-step fields in one request and shows edits immediately
+while saving. Making charge stays editable with the second step enabled and is
+applied once to the order.
+
+Run `npm test` for calculation, settlement and save-queue regressions, and
+`npm run test:ui` for isolated browser checks with simulated slow/failed API saves.
+The browser checks do not access the real database. They require Playwright's
+Chromium browser, or set `PLAYWRIGHT_CHANNEL=msedge` to use installed Microsoft
+Edge (PowerShell: `$env:PLAYWRIGHT_CHANNEL = 'msedge'; npm run test:ui`).
+
 An offline-first desktop application for jewellery polishing workshops: order
 registry, customers, dashboard, and settings, running locally on Windows with
 optional cloud backup/sync to MongoDB Atlas. Built with Next.js + Electron +

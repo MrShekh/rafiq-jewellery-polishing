@@ -12,8 +12,8 @@ export async function GET(req: NextRequest) {
     const user = await requireUser();
     const { searchParams } = new URL(req.url);
     const filter = orderFilterSchema.parse(Object.fromEntries(searchParams.entries()));
-    const { rows, total, totals } = await listOrders(user.id, filter);
-    return ok({ orders: rows, total, totals, page: filter.page, pageSize: filter.pageSize });
+    const { rows, total, totals, precision, formulaVersion } = await listOrders(user.id, filter);
+    return ok({ orders: rows, total, totals, precision, formulaVersion, page: filter.page, pageSize: filter.pageSize });
   } catch (err) {
     return handleApiError(err);
   }

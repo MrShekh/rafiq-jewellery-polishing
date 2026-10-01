@@ -8,7 +8,7 @@ import {
   useReactTable,
   type ColumnDef,
 } from "@tanstack/react-table";
-import { ArrowDown, ArrowUp, ArrowUpDown, Coins, Trash2, X } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { nanoid } from "nanoid";
 
@@ -35,25 +35,18 @@ import {
 } from "@/components/order-table/editable-cells";
 import { OrderFiltersBar, type OrderFiltersState } from "@/components/order-table/order-filters-bar";
 import { DeleteOrderDialog } from "@/components/order-table/delete-order-dialog";
-import { ClearOrderDialog } from "@/components/order-table/clear-order-dialog";
+import { useOrderEditor } from "@/lib/hooks/use-order-editor";
+import type { OrdersResponse } from "@/lib/order-editor";
+import type { OrderInput } from "@/lib/validation/order";
 import { CustomerFormDialog } from "@/components/customer/customer-form-dialog";
 import { useCustomers } from "@/lib/hooks/use-customers";
 import { useItemOptions } from "@/lib/hooks/use-items";
-
-interface OrdersResponse {
-  orders: Order[];
-  total: number;
-  totals: OrderTotals;
-  page: number;
-  pageSize: number;
-}
+import { businessDateIso } from "@/lib/business-date";
 
 const fetcher = (url: string) => fetch(url).then(async (r) => {
   if (!r.ok) throw new Error("Failed to load orders");
   return r.json();
 });
-
-const todayIso = () => new Date().toISOString().slice(0, 10);
 
 interface DraftOrder {
   key: string;
@@ -70,7 +63,7 @@ interface DraftOrder {
 function newDraft(): DraftOrder {
   return {
     key: `draft-${nanoid()}`,
-    orderDate: todayIso(),
+    orderDate: businessDateIso(),
     customerId: "",
     item: "Ring",
     pieces: "1",
@@ -97,7 +90,6 @@ export function OrderRegistryTable() {
   const [pageSize, setPageSize] = React.useState(100);
   const [draft, setDraft] = React.useState<DraftOrder | null>(null);
   const [deleteTarget, setDeleteTarget] = React.useState<Order | null>(null);
-  const [clearTarget, setClearTarget] = React.useState<Order | null>(null);
   const [quickAddCustomer, setQuickAddCustomer] = React.useState<{ open: boolean; initialName: string }>({
     open: false,
     initialName: "",
@@ -123,14 +115,16 @@ export function OrderRegistryTable() {
     return params.toString();
   }, [filters, sortBy, sortDir, page, pageSize]);
 
-  const { data, mutate, isLoading } = useSWR<OrdersResponse>(`/api/orders?${queryString}`, fetcher, {
+  const { data: serverData, mutate, isLoading } = useSWR<OrdersResponse>(`/api/orders?${queryString}`, fetcher, {
     keepPreviousData: true,
   });
+  const { displayed: data, save, saving } = useOrderEditor(serverData, mutate);
 
   const orders = React.useMemo(() => data?.orders ?? [], [data]);
+  const orderIds = orders.map((order) => order.id).join(",");
   const rowOrder = React.useMemo(
-    () => [...(draft ? [draft.key] : []), ...orders.map((o) => o.id)],
-    [draft, orders],
+    () => [...(draft ? [draft.key] : []), ...orderIds.split(",").filter(Boolean)],
+    [draft, orderIds],
   );
 
   function updateFilters(next: OrderFiltersState) {
@@ -147,7 +141,7 @@ export function OrderRegistryTable() {
     }
   }
 
-  async function commitField(order: Order, field: string, rawValue: string) {
+  const commitField = React.useCallback(async (order: Order, field: string, rawValue: string) => {
     try {
       let payload: Record<string, unknown> = { [field]: rawValue };
 
@@ -167,25 +161,19 @@ export function OrderRegistryTable() {
             "Weight Out exceeds Weight In. This is unusual - save this order anyway?",
           );
           if (!confirmed) {
-            mutate();
-            return;
+            return false;
           }
           payload.weightExceedsConfirmed = true;
         }
       }
       if (field === "pieces") payload.pieces = Number(rawValue);
 
-      const result = await api.patch<{ order: Order; warnings: string[] }>(
-        `/api/orders/${order.id}`,
-        payload,
-      );
-      result.warnings?.forEach((w) => toast.warning(w));
-      mutate();
-    } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "Could not save that change.");
-      mutate();
+      await save(order, payload as Partial<OrderInput>);
+      return true;
+    } catch {
+      return false;
     }
-  }
+  }, [save]);
 
   async function submitDraft(customerId: string) {
     if (!draft) return;
@@ -411,9 +399,6 @@ export function OrderRegistryTable() {
         header: "Making Charge",
         size: 130,
         cell: ({ row }) => {
-          if (row.original.weightIn2 != null) {
-            return <ReadOnlyCell value={row.original.makingCharge} className="text-muted-foreground bg-muted/20" />;
-          }
           return (
             <GridTextInput
               rowId={row.original.id}
@@ -537,29 +522,13 @@ export function OrderRegistryTable() {
                     : "text-muted-foreground hover:text-primary",
                 )}
                 onClick={() => {
-                  if (row.original.weightIn2 != null) {
-                    commitField(row.original, "weightIn2", "");
-                    commitField(row.original, "weightOut2", "");
-                    commitField(row.original, "pieces2", "");
-                  } else {
-                    commitField(row.original, "weightIn2", "0.000");
-                    commitField(row.original, "weightOut2", "0.000");
-                    commitField(row.original, "pieces2", String(row.original.pieces));
-                  }
+                  void save(row.original, row.original.weightIn2 != null
+                    ? { weightIn2: null, weightOut2: null, pieces2: null }
+                    : { weightIn2: "0.000", weightOut2: "0.000", pieces2: row.original.pieces }).catch(() => {});
                 }}
                 title={row.original.weightIn2 != null ? "Remove 2nd polishing step" : "Add 2nd polishing step"}
               >
                 {row.original.weightIn2 != null ? "−2nd" : "+2nd"}
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7 text-muted-foreground hover:text-primary"
-                onClick={() => setClearTarget(row.original)}
-                aria-label="Clear fine"
-                title="Clear fine (full or partial)"
-              >
-                <Coins className="h-3.5 w-3.5" />
               </Button>
               <Button
                 variant="ghost"
@@ -576,12 +545,13 @@ export function OrderRegistryTable() {
       },
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [customers, rowOrder],
+    [customers, rowOrder, commitField, save],
   );
 
 
   const table = useReactTable({
     data: orders,
+    getRowId: (row) => row.id,
     columns,
     getCoreRowModel: getCoreRowModel(),
     columnResizeMode: "onChange",
@@ -710,6 +680,7 @@ export function OrderRegistryTable() {
       </div>
 
       <TotalsFooter totals={data?.totals} />
+      <div aria-live="polite" className="px-3 text-xs text-muted-foreground no-print">{saving ? "Saving changes..." : ""}</div>
 
       <div className="flex items-center justify-between border-t bg-card px-3 py-1.5 text-xs no-print">
         <div className="flex items-center gap-2">
@@ -749,13 +720,6 @@ export function OrderRegistryTable() {
         onOpenChange={(open) => !open && setDeleteTarget(null)}
         onConfirm={confirmDelete}
         orderLabel={deleteTarget ? `${deleteTarget.orderNumber} - ${deleteTarget.customerNameSnapshot} - ${deleteTarget.item}` : undefined}
-      />
-
-      <ClearOrderDialog
-        open={!!clearTarget}
-        onOpenChange={(open) => !open && setClearTarget(null)}
-        order={clearTarget}
-        onCleared={() => mutate()}
       />
 
       <CustomerFormDialog

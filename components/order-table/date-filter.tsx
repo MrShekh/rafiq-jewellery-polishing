@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { DateInput } from "@/components/ui/date-input";
 import { Separator } from "@/components/ui/separator";
+import { businessDateIso } from "@/lib/business-date";
 
 export interface DateRange {
   from?: string;
@@ -25,7 +26,8 @@ type Preset = "today" | "yesterday" | "week" | "month" | "custom" | "all";
 const iso = (d: Date) => format(d, "yyyy-MM-dd");
 
 function presetRange(preset: Preset): DateRange {
-  const now = new Date();
+  // Use India's calendar date for preset arithmetic, even on a UTC server/browser.
+  const now = new Date(`${businessDateIso()}T12:00:00`);
   switch (preset) {
     case "today":
       return { from: iso(now), to: iso(now) };

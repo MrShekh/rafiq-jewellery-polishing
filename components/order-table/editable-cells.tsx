@@ -74,7 +74,7 @@ export function GridTextInput({
   placeholder,
 }: BaseCellProps & {
   value: string;
-  onCommit: (value: string) => void;
+  onCommit: (value: string) => void | boolean | Promise<boolean | void>;
   type?: "text" | "number";
   align?: "left" | "right";
   list?: string;
@@ -83,14 +83,33 @@ export function GridTextInput({
   placeholder?: string;
 }) {
   const [local, setLocal] = React.useState(value);
+  const dirty = React.useRef(false);
+  const committed = React.useRef(value);
+  const revision = React.useRef(0);
   const key = `${rowId}:${columnKey}`;
 
-  React.useEffect(() => setLocal(value), [value]);
+  React.useEffect(() => {
+    committed.current = value;
+    if (!dirty.current) setLocal(value);
+  }, [value]);
+
+  function commit() {
+    if (!dirty.current) return;
+    dirty.current = false;
+    if (local === committed.current) return;
+    const edit = revision.current;
+    void Promise.resolve(onCommit(local)).then((saved) => {
+      if (saved === false && revision.current === edit) setLocal(committed.current);
+    }).catch(() => {
+      if (revision.current === edit) setLocal(committed.current);
+    });
+  }
 
   return (
     <Input
       ref={registerCellRef(refs, key)}
       value={local}
+      aria-label={`${columnKey} for order ${rowId}`}
       type={type}
       inputMode={type === "number" ? "decimal" : undefined}
       step={step}
@@ -98,25 +117,25 @@ export function GridTextInput({
       list={list}
       disabled={disabled}
       placeholder={placeholder}
-      onChange={(e) => setLocal(e.target.value)}
+      onChange={(e) => { dirty.current = true; revision.current++; setLocal(e.target.value); }}
       onFocus={(e) => e.currentTarget.select()}
-      onBlur={() => {
-        if (local !== value) onCommit(local);
-      }}
+      onBlur={commit}
       onKeyDown={(e) => {
         if (e.key === "Enter") {
           e.preventDefault();
-          if (local !== value) onCommit(local);
-          onNavigate(key, "down", columnKey, rowOrder);
+          commit();
+          onNavigate(rowId, "down", columnKey, rowOrder);
         } else if (e.key === "Escape") {
-          setLocal(value);
+          dirty.current = false;
+          revision.current++;
+          setLocal(committed.current);
           e.currentTarget.blur();
         } else if (e.key === "ArrowDown" && (e.metaKey || e.altKey)) {
           e.preventDefault();
-          onNavigate(key, "down", columnKey, rowOrder);
+          onNavigate(rowId, "down", columnKey, rowOrder);
         } else if (e.key === "ArrowUp" && (e.metaKey || e.altKey)) {
           e.preventDefault();
-          onNavigate(key, "up", columnKey, rowOrder);
+          onNavigate(rowId, "up", columnKey, rowOrder);
         }
       }}
       className={cn(

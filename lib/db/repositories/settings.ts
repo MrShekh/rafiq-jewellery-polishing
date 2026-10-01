@@ -41,11 +41,12 @@ export async function getAllSettings(userId: string): Promise<Record<string, str
 }
 
 export async function getPrecisionPolicy(userId: string): Promise<PrecisionPolicy> {
-  const [w, t, f] = await Promise.all([
-    getSetting(userId, SETTINGS_KEYS.precisionWeight),
-    getSetting(userId, SETTINGS_KEYS.precisionTouch),
-    getSetting(userId, SETTINGS_KEYS.precisionFine),
-  ]);
+  const c = await col<SettingDoc>("settings");
+  const values = await c.find({ userId, key: { $in: [SETTINGS_KEYS.precisionWeight, SETTINGS_KEYS.precisionTouch, SETTINGS_KEYS.precisionFine] } }).toArray();
+  const settings = new Map(values.map((setting) => [setting.key, setting.value]));
+  const w = settings.get(SETTINGS_KEYS.precisionWeight);
+  const t = settings.get(SETTINGS_KEYS.precisionTouch);
+  const f = settings.get(SETTINGS_KEYS.precisionFine);
   const weight = Number(w ?? DEFAULT_PRECISION.weight);
   const touch = Number(t ?? DEFAULT_PRECISION.touch);
   const fine = Number(f ?? DEFAULT_PRECISION.fine);

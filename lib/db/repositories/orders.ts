@@ -7,6 +7,8 @@ import {
   calculateOrderTotals,
   reconcileClearAfterEdit,
   type OrderTotals,
+  type PrecisionPolicy,
+  type FormulaVersion,
 } from "@/lib/calculations";
 import { datePrefixForOrderNumber, formatOrderNumber } from "@/lib/ids/orderId";
 import type { OrderFilter, OrderInput } from "@/lib/validation/order";
@@ -37,6 +39,8 @@ export interface OrderListResult {
   rows: any[];
   total: number;
   totals: OrderTotals;
+  precision: PrecisionPolicy;
+  formulaVersion: FormulaVersion;
 }
 
 export async function listOrders(userId: string, filter: OrderFilter): Promise<OrderListResult> {
@@ -78,8 +82,8 @@ export async function listOrders(userId: string, filter: OrderFilter): Promise<O
   const sortField = SORT_MAP[filter.sortBy] ?? "orderDate";
   const sortDir = filter.sortDir === "asc" ? 1 : -1;
 
-  const total = await c.countDocuments(query as any);
-  const rows = await c
+  const totalPromise = c.countDocuments(query as any);
+  const rowsPromise = c
     .find(query as any)
     .sort({ [sortField]: sortDir, orderNumber: -1 })
     .skip((filter.page - 1) * filter.pageSize)
@@ -87,7 +91,7 @@ export async function listOrders(userId: string, filter: OrderFilter): Promise<O
     .toArray();
 
   // Totals across the full filtered set (not just the page)
-  const allRows = await c
+  const allRowsPromise = c
     .find(query as any, {
       projection: {
         pieces: 1,
@@ -104,10 +108,12 @@ export async function listOrders(userId: string, filter: OrderFilter): Promise<O
     })
     .toArray();
 
-  const precision = await getPrecisionPolicy(userId);
+  const [total, rows, allRows, precision, formulaVersion] = await Promise.all([
+    totalPromise, rowsPromise, allRowsPromise, getPrecisionPolicy(userId), getFormulaVersion(userId),
+  ]);
   const totals = calculateOrderTotals(allRows as any[], precision);
 
-  return { rows: mapDocs(rows), total, totals };
+  return { rows: mapDocs(rows), total, totals, precision, formulaVersion };
 }
 
 export async function getOrderById(userId: string, id: string): Promise<any> {
@@ -199,9 +205,9 @@ export async function updateOrder(
   id: string,
   input: Partial<OrderInput>,
 ): Promise<OrderMutationResult> {
-  const precision = await getPrecisionPolicy(userId);
-  const formulaVersion = await getFormulaVersion(userId);
-  const existing = await getOrderById(userId, id);
+  const [precision, formulaVersion, existing] = await Promise.all([
+    getPrecisionPolicy(userId), getFormulaVersion(userId), getOrderById(userId, id),
+  ]);
   if (existing.deletedAt) throw new ConflictError("Cannot edit a deleted order");
 
   const merged = {
@@ -256,7 +262,7 @@ export async function updateOrder(
   // consistent (e.g. weights edited down after a partial clear).
   const reconciled = reconcileClearAfterEdit(calc.fineTotalString, existing.clearedAmount ?? 0, precision);
 
-  const now = new Date().toISOString();
+  const now = new Date(Math.max(Date.now(), Date.parse(existing.updatedAt) + 1)).toISOString();
   const updates: Partial<OrderDoc> = {
     orderDate: merged.orderDate,
     customerId: merged.customerId,
@@ -281,9 +287,10 @@ export async function updateOrder(
   };
 
   const c = await col<OrderDoc>("orders");
-  await c.updateOne({ _id: id, userId }, { $set: updates });
+  const result = await c.updateOne({ _id: id, userId, updatedAt: existing.updatedAt, deletedAt: null }, { $set: updates });
+  if (!result.matchedCount) throw new ConflictError("This order changed while saving. Please review it and try again.");
   logger.info("Order updated", { orderId: id });
-  return { order: await getOrderById(userId, id), warnings };
+  return { order: { ...existing, ...updates }, warnings };
 }
 
 /** Records a full or partial fine settlement against one order. */
@@ -299,10 +306,10 @@ export async function clearOrderFine(userId: string, id: string, amount: "full" 
     throw new ConflictError(err instanceof Error ? err.message : "Could not clear this order");
   }
 
-  const now = new Date().toISOString();
+  const now = new Date(Math.max(Date.now(), Date.parse(existing.updatedAt) + 1)).toISOString();
   const c = await col<OrderDoc>("orders");
-  await c.updateOne(
-    { _id: id, userId },
+  const saved = await c.updateOne(
+    { _id: id, userId, updatedAt: existing.updatedAt, deletedAt: null },
     {
       $set: {
         clearedAmount: result.clearedAmount,
@@ -313,6 +320,7 @@ export async function clearOrderFine(userId: string, id: string, amount: "full" 
       },
     },
   );
+  if (!saved.matchedCount) throw new ConflictError("This order changed while clearing. Please review the balance again.");
   logger.info("Order fine cleared", { orderId: id, amount, newStatus: result.status });
   return { order: await getOrderById(userId, id), warnings: [] };
 }

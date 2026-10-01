@@ -1,4 +1,4 @@
-import { MongoClient, type Db, type Collection } from "mongodb";
+import { MongoClient, type Db, type Collection, type ClientSession } from "mongodb";
 import { logger } from "@/lib/logger";
 
 /**
@@ -64,6 +64,16 @@ export async function closeDb() {
     }
 }
 
+export async function withMongoTransaction<T>(work: (session: ClientSession) => Promise<T>): Promise<T> {
+    await getDb();
+    const session = globalThis.__mongoClient!.startSession();
+    try {
+        return await session.withTransaction(() => work(session));
+    } finally {
+        await session.endSession();
+    }
+}
+
 /** Typed helper — returns a strongly-typed MongoDB collection. */
 export async function col<T extends object = object>(name: string): Promise<Collection<T>> {
     const db = await getDb();
@@ -86,6 +96,8 @@ export async function ensureIndexes() {
     await db.collection("orders").createIndex({ userId: 1, orderDate: -1 });
     await db.collection("orders").createIndex({ userId: 1, customerId: 1 });
     await db.collection("orders").createIndex({ userId: 1, orderNumber: 1 }, { unique: true });
+    await db.collection("customer_settlements").createIndex({ userId: 1, customerId: 1, createdAt: -1 });
+    await db.collection("customer_settlements").createIndex({ userId: 1, customerId: 1, token: 1 }, { unique: true });
 
     // settings — scoped by userId+key
     await db.collection("settings").createIndex({ userId: 1, key: 1 }, { unique: true });

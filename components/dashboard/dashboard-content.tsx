@@ -3,7 +3,7 @@
 import Link from "next/link";
 import useSWR from "swr";
 
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Table,
   TableBody,
@@ -15,22 +15,28 @@ import {
 import type { Order } from "@/db/schema";
 import type { OrderTotals } from "@/lib/calculations";
 
-const fetcher = (url: string) => fetch(url).then((r) => r.json());
+const fetcher = async (url: string) => {
+  const response = await fetch(url);
+  if (!response.ok) throw new Error("Could not load dashboard totals.");
+  return response.json();
+};
 
 interface DashboardResponse {
   today: OrderTotals & { orderCount: number };
   monthly: OrderTotals & { orderCount: number };
   recentOrders: Order[];
+  periods: { today: { start: string; end: string }; month: { start: string; end: string } };
 }
 
 export function DashboardContent() {
-  const { data } = useSWR<DashboardResponse>("/api/dashboard", fetcher, { refreshInterval: 30_000 });
+  const { data, error } = useSWR<DashboardResponse>("/api/dashboard", fetcher, { refreshInterval: 30_000 });
 
   return (
     <div className="h-full min-h-0 overflow-auto p-6">
+      {error && <p role="alert" className="mb-4 text-sm text-destructive">Could not refresh dashboard totals. Please try again.</p>}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <SummaryCard title="Today's Summary" data={data?.today} />
-        <SummaryCard title="Monthly Summary" data={data?.monthly} />
+        <SummaryCard title="Today's Summary" data={data?.today} dateLabel={data?.periods ? `Orders dated ${data.periods.today.start} (India time)` : undefined} />
+        <SummaryCard title="Monthly Summary" data={data?.monthly} dateLabel={data?.periods ? `Orders dated ${data.periods.month.start} to ${data.periods.month.end} (India time)` : undefined} />
       </div>
 
       <Card className="mt-6">
@@ -77,11 +83,12 @@ export function DashboardContent() {
   );
 }
 
-function SummaryCard({ title, data }: { title: string; data?: OrderTotals & { orderCount: number } }) {
+function SummaryCard({ title, data, dateLabel }: { title: string; data?: OrderTotals & { orderCount: number }; dateLabel?: string }) {
   return (
     <Card>
       <CardHeader>
         <CardTitle>{title}</CardTitle>
+        {dateLabel && <CardDescription>{dateLabel}</CardDescription>}
       </CardHeader>
       <CardContent className="grid grid-cols-2 gap-4 sm:grid-cols-4">
         <Stat label="Orders" value={data?.orderCount.toLocaleString() ?? "-"} />
@@ -151,4 +158,3 @@ function Stat({ label, value }: { label: string; value: string }) {
     </div>
   );
 }
-

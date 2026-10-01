@@ -25,7 +25,7 @@ import type { Customer } from "@/db/schema";
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json());
 
-type CustomerWithDue = Customer & { dueFine?: string; orderCount?: number };
+type CustomerWithDue = Customer & { dueFine?: string; orderCount?: number; netFine?: string; netDirection?: "collect" | "return" | "balanced"; outstandingOrderCount?: number };
 
 export function CustomersList() {
   const [search, setSearch] = React.useState("");
@@ -102,8 +102,8 @@ export function CustomersList() {
                     <div className="flex shrink-0 flex-wrap justify-end gap-1">
                       {!c.isActive && <Badge variant="outline" className="text-muted-foreground">Inactive</Badge>}
                       {!!c.orderCount && (
-                        Number(c.dueFine) > 0 ? (
-                          <Badge variant="destructive">Due: {c.dueFine}</Badge>
+                        (c.outstandingOrderCount ?? 0) > 0 ? (
+                          <Badge variant="outline">{c.netDirection === "collect" ? "Customer pays" : c.netDirection === "return" ? "You return" : "Balanced"}: {c.netFine} g</Badge>
                         ) : (
                           <Badge variant="success">Cleared</Badge>
                         )
@@ -119,6 +119,7 @@ export function CustomersList() {
                     )}
                   </div>
                 </Link>
+                {(c.outstandingOrderCount ?? 0) > 0 && <Link href={`/customers/${c.id}#customer-balance`} className="mt-3 inline-block text-sm font-medium text-primary hover:underline">Review &amp; clear balance</Link>}
                 <div className="mt-3 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
                   <Button
                     variant="ghost"

@@ -19,6 +19,7 @@ import { OrderFiltersBar, type OrderFiltersState } from "@/components/order-tabl
 import type { Customer, Order } from "@/db/schema";
 import type { CustomerSummary } from "@/lib/db/repositories/customers";
 import { clearStatusBadgeVariant, clearStatusLabel } from "@/lib/order-status";
+import { CustomerSettlement } from "@/components/customer/customer-settlement";
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json());
 
@@ -39,7 +40,7 @@ export function CustomerDetail({ customerId }: { customerId: string }) {
     status: "active",
   });
 
-  const history = data?.history ?? [];
+  const history = React.useMemo(() => data?.history ?? [], [data?.history]);
   const filteredHistory = React.useMemo(() => {
     return history.filter((o) => {
       const status = ((o as any).clearStatus as "open" | "partial" | "cleared" | undefined) ?? "open";
@@ -116,6 +117,8 @@ export function CustomerDetail({ customerId }: { customerId: string }) {
         />
         <SummaryTile label="Already Settled" value={summary.totalReturned} />
       </div>
+
+      <CustomerSettlement customerId={customerId} customerName={customer.name} />
 
       <OrderFiltersBar
         filters={filters}
@@ -264,4 +267,3 @@ function SummaryTile({
     </div>
   );
 }
-

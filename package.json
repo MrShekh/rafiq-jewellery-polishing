@@ -17,6 +17,7 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "test:ui": "node tests/e2e/registry-settlement.mjs",
     "test:db": "vitest run --config vitest.db.config.mts",
     "test:watch": "vitest",
     "db:generate": "drizzle-kit generate",

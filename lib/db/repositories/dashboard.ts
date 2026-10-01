@@ -2,23 +2,7 @@ import { col } from "@/lib/db/mongo";
 import { type OrderDoc } from "@/lib/db/types";
 import { calculateOrderTotals, type OrderTotals } from "@/lib/calculations";
 import { getPrecisionPolicy } from "@/lib/db/repositories/settings";
-
-function todayRangeIso() {
-  const now = new Date();
-  const y = now.getFullYear();
-  const m = String(now.getMonth() + 1).padStart(2, "0");
-  const d = String(now.getDate()).padStart(2, "0");
-  const s = `${y}-${m}-${d}`;
-  return { start: s, end: s };
-}
-
-function monthRangeIso() {
-  const now = new Date();
-  const y = now.getFullYear();
-  const m = String(now.getMonth() + 1).padStart(2, "0");
-  const lastDay = new Date(y, now.getMonth() + 1, 0).getDate();
-  return { start: `${y}-${m}-01`, end: `${y}-${m}-${String(lastDay).padStart(2, "0")}` };
-}
+import { businessDateRanges } from "@/lib/business-date";
 
 async function summarizeRange(
   userId: string,
@@ -51,13 +35,13 @@ async function summarizeRange(
   return { ...totals, orderCount: rows.length };
 }
 
-export async function getTodaySummary(userId: string) {
-  const { start, end } = todayRangeIso();
+export async function getTodaySummary(userId: string, now = new Date()) {
+  const { start, end } = businessDateRanges(now).today;
   return summarizeRange(userId, start, end);
 }
 
-export async function getMonthlySummary(userId: string) {
-  const { start, end } = monthRangeIso();
+export async function getMonthlySummary(userId: string, now = new Date()) {
+  const { start, end } = businessDateRanges(now).month;
   return summarizeRange(userId, start, end);
 }
 

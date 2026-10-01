@@ -284,6 +284,15 @@ export function calculateOrderTotals(
 
 export type ClearStatus = "open" | "partial" | "cleared";
 
+/** Offset the two directions only within a single customer's account. */
+export function customerNetBalance(toCollect: DecimalInput, toReturn: DecimalInput, places = 3) {
+  const net = round(toDecimal(toCollect).minus(toDecimal(toReturn)), places);
+  return {
+    amount: net.abs().toFixed(places),
+    direction: net.isZero() ? "balanced" as const : net.isPositive() ? "collect" as const : "return" as const,
+  };
+}
+
 /** Derives open/partial/cleared purely from the numbers, so it's always consistent with clearedAmount. */
 export function computeClearStatus(
   fineTotal: DecimalInput,
